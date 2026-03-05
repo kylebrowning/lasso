@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Defaults
 
 public enum LassoDefaults {
-    public static let apiBaseURL = "https://api.lasso.build"
+    public static let apiBaseURL = "https://lasso.build"
 }
 
 // MARK: - AuthCredentials

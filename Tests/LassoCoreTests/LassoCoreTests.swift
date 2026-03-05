@@ -159,7 +159,7 @@ final class LassoCoreTests: XCTestCase {
     // MARK: - LassoDefaults
 
     func testDefaultAPIBaseURL() {
-        XCTAssertEqual(LassoDefaults.apiBaseURL, "https://api.lasso.build")
+        XCTAssertEqual(LassoDefaults.apiBaseURL, "https://lasso.build")
     }
 
     // MARK: - ImageDiffer
