@@ -118,13 +118,13 @@ struct DriverStartCommand: AsyncParsableCommand {
         }
 
         // Block until interrupted
-        await withCheckedContinuation { (_: CheckedContinuation<Void, Never>) in
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             let sigint = DispatchSource.makeSignalSource(signal: SIGINT, queue: .main)
             signal(SIGINT, SIG_IGN)
             sigint.setEventHandler {
                 Task {
                     try? await manager.stop()
-                    Foundation.exit(0)
+                    continuation.resume()
                 }
             }
             sigint.resume()
