@@ -30,6 +30,12 @@ struct CICommand: AsyncParsableCommand {
         @Option(name: .long, help: "Bundle identifier")
         var bundleId: String?
 
+        /// Log a step to stderr so CI sees it immediately (stdout is buffered).
+        func log(_ message: String) {
+            guard !options.json else { return }
+            FileHandle.standardError.write(Data("[lasso] \(message)\n".utf8))
+        }
+
         func run() async throws {
             let config = try? LassoConfig.load()
             let captureDir = ".lasso/captures"
@@ -40,6 +46,7 @@ struct CICommand: AsyncParsableCommand {
             let resolved = try await ResolvedProject.resolve(
                 schemeFlag: scheme, simulatorFlag: simulator, bundleIdFlag: bundleId, config: config
             )
+            log("Resolved: scheme=\(resolved.scheme) simulator=\(resolved.simulator) screens=\(resolved.screens.count)")
 
             guard !resolved.screens.isEmpty else {
                 throw LassoError.invalidArgument("No screens configured in lasso.yml")
@@ -49,11 +56,13 @@ struct CICommand: AsyncParsableCommand {
             guard let credentials = AuthStore.resolveCredentials() else {
                 throw LassoError.notAuthenticated
             }
+            log("Authenticated with \(credentials.baseURL)")
 
             let client = RangeClient.live(apiKey: credentials.apiKey, baseURL: credentials.baseURL)
             let identifier = ProjectIdentifier.live
             let project = try await identifier.projectSlug()
             let branch = try await identifier.currentBranch()
+            log("Project: \(project) Branch: \(branch)")
 
             // Get commit SHA (best effort)
             let commitSHA = try? await shell("git rev-parse HEAD")
@@ -65,15 +74,17 @@ struct CICommand: AsyncParsableCommand {
             let needsDriver = resolved.screens.hasNavigationSteps
             let driverCache = DriverCache.live
             let driverCacheValid = await driverCache.isValid()
+            log("Driver needed: \(needsDriver), cache valid: \(driverCacheValid)")
             if needsDriver && !driverCacheValid {
-                if !options.json {
-                    print("Preparing driver cache...")
-                }
+                log("Preparing driver cache...")
                 try await driverCache.buildAndCache(resolved.simulator)
+                log("Driver cache ready")
             }
 
             // 1. Boot → Build → Install → Launch → Capture
+            log("Booting simulator: \(resolved.simulator)")
             let device = try await SimulatorManager().boot(nameOrUDID: resolved.simulator)
+            log("Simulator booted: \(device.name) (\(device.udid))")
             let destination = "platform=iOS Simulator,name=\(device.name)"
 
             var productPath: String?
@@ -82,14 +93,10 @@ struct CICommand: AsyncParsableCommand {
                 scheme: resolved.scheme, workspace: resolved.workspace,
                 project: resolved.project, destination: destination
             ) {
-                if !options.json {
-                    print("Skipping build — using \(resolved_path)")
-                }
+                log("Skipping build — using \(resolved_path)")
                 productPath = resolved_path
             } else {
-                if !options.json {
-                    print("Building \(resolved.scheme)...")
-                }
+                log("Building \(resolved.scheme)...")
 
                 let buildResult = try await XcodeBuildRunner().build(
                     scheme: resolved.scheme,
@@ -97,6 +104,7 @@ struct CICommand: AsyncParsableCommand {
                     project: resolved.project,
                     destination: destination
                 )
+                log("Build finished: success=\(buildResult.success) duration=\(String(format: "%.1fs", buildResult.duration))")
 
                 guard buildResult.success else {
                     if options.json {
@@ -111,10 +119,12 @@ struct CICommand: AsyncParsableCommand {
 
             if let bid = resolved.bundleId {
                 if let productPath {
+                    log("Installing \(bid)...")
                     try await XcodeBuildRunner().install(
                         bundleId: bid, productPath: productPath, udid: device.udid
                     )
                 }
+                log("Launching \(bid)...")
                 try await XcodeBuildRunner().launch(bundleId: bid, udid: device.udid)
                 try await Task.sleep(for: .seconds(2))
             }
@@ -128,10 +138,9 @@ struct CICommand: AsyncParsableCommand {
                     port: options.driverPort
                 )
                 let manager = DriverManager.live(cache: driverCache)
-                if !options.json {
-                    print("Starting driver for navigation...")
-                }
+                log("Starting driver on port \(options.driverPort)...")
                 try await manager.start(driverConfig)
+                log("Driver healthy")
                 driverManager = manager
             }
 
@@ -141,12 +150,11 @@ struct CICommand: AsyncParsableCommand {
                 }
             }
 
-            if !options.json {
-                print("Capturing \(resolved.screens.count) screen(s)...")
-            }
+            log("Capturing \(resolved.screens.count) screen(s)...")
 
             let ui = options.makeUIAutomation(udid: device.udid)
             _ = try await ScreenNavigator.live.captureAll(resolved.screens, ui, captureDir)
+            log("Capture complete")
 
             // 2. Compare against baselines
             let diffConfig = config?.diff ?? .init()
@@ -169,9 +177,7 @@ struct CICommand: AsyncParsableCommand {
                 throw LassoError.noCaptures(captureDir)
             }
 
-            if !options.json {
-                print("Comparing \(captureFiles.count) screen(s) against baselines...")
-            }
+            log("Comparing \(captureFiles.count) screen(s) against baselines...")
 
             var screenUploads: [RunScreenUpload] = []
             var allPassed = true
@@ -247,11 +253,10 @@ struct CICommand: AsyncParsableCommand {
                 screens: screenUploads
             )
 
-            if !options.json {
-                print("Uploading results...")
-            }
+            log("Uploading results to \(credentials.baseURL)...")
 
             let runResponse = try await client.createRun(project, upload)
+            log("Upload complete: run=\(runResponse.runId)")
 
             // 4. Output results
             struct CIRunResult: Codable, Sendable {
