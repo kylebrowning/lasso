@@ -24,8 +24,35 @@ jobs:
           strip "$BINARY"
           tar -czf "lasso-${{ github.ref_name }}-macos.tar.gz" -C "$(dirname "$BINARY")" lasso
 
+      - name: Build and package driver
+        run: |
+          xcodebuild build-for-testing \
+            -project Apps/LassoDriver/LassoDriver.xcodeproj \
+            -scheme LassoDriverUITests \
+            -destination "platform=iOS Simulator,name=iPhone 16"
+
+          XCTESTRUN=$(find ~/Library/Developer/Xcode/DerivedData -name "*.xctestrun" -path "*LassoDriver*" | head -1)
+          if [ -z "$XCTESTRUN" ]; then
+            echo "Error: .xctestrun file not found in DerivedData"
+            exit 1
+          fi
+          PRODUCTS_DIR=$(dirname "$XCTESTRUN")
+
+          STAGING=$(mktemp -d)
+          cp -R "$PRODUCTS_DIR" "$STAGING/Products"
+
+          XCODE_VERSION=$(xcodebuild -version | head -1 | awk '{print $2}')
+          XCODE_BUILD=$(xcodebuild -version | tail -1 | awk '{print $3}')
+          printf '{"xcodeVersion":"%s","xcodeBuildVersion":"%s","builtAt":"%s","lassoVersion":"%s"}' \
+            "$XCODE_VERSION" "$XCODE_BUILD" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${{ github.ref_name }}" \
+            > "$STAGING/driver-info.json"
+
+          tar -czf "lasso-driver-${{ github.ref_name }}-macos.tar.gz" -C "$STAGING" Products driver-info.json
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          files: lasso-${{ github.ref_name }}-macos.tar.gz
+          files: |
+            lasso-${{ github.ref_name }}-macos.tar.gz
+            lasso-driver-${{ github.ref_name }}-macos.tar.gz
           generate_release_notes: true
