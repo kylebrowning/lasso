@@ -114,6 +114,7 @@ extension NetworkClient {
             sendRequest: { request in
                 var request = request
                 addAuth(&request)
+                request.timeoutInterval = max(request.timeoutInterval, 300)
                 let (data, response) = try await session.data(for: request)
                 try validateResponse(response, data: data)
                 return data
