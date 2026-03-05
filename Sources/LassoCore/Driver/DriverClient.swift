@@ -142,6 +142,12 @@ private struct SourceResponse: Decodable {
     let source: String
 }
 
+private struct ScreenshotResponse: Decodable {
+    let format: String
+    let encoding: String
+    let data: String
+}
+
 // MARK: - DriverClient
 
 public struct DriverClient: Sendable {
@@ -151,6 +157,7 @@ public struct DriverClient: Sendable {
     public var swipe: @Sendable (SwipeRequest) async throws -> Void
     public var typeText: @Sendable (String) async throws -> Void
     public var pageSource: @Sendable () async throws -> String
+    public var screenshot: @Sendable () async throws -> Data
 
     public init(
         health: @escaping @Sendable () async throws -> HealthResponse,
@@ -158,7 +165,8 @@ public struct DriverClient: Sendable {
         tap: @escaping @Sendable (TapRequest) async throws -> Void,
         swipe: @escaping @Sendable (SwipeRequest) async throws -> Void,
         typeText: @escaping @Sendable (String) async throws -> Void,
-        pageSource: @escaping @Sendable () async throws -> String
+        pageSource: @escaping @Sendable () async throws -> String,
+        screenshot: @escaping @Sendable () async throws -> Data
     ) {
         self.health = health
         self.hierarchy = hierarchy
@@ -166,6 +174,7 @@ public struct DriverClient: Sendable {
         self.swipe = swipe
         self.typeText = typeText
         self.pageSource = pageSource
+        self.screenshot = screenshot
     }
 }
 
@@ -255,6 +264,14 @@ extension DriverClient {
                 let data = try await driverGet(baseURL: baseURL, path: "/source")
                 let resp = try decoder.decode(SourceResponse.self, from: data)
                 return resp.source
+            },
+            screenshot: {
+                let data = try await driverGet(baseURL: baseURL, path: "/screenshot")
+                let resp = try decoder.decode(ScreenshotResponse.self, from: data)
+                guard let pngData = Data(base64Encoded: resp.data) else {
+                    throw LassoError.invalidImage
+                }
+                return pngData
             }
         )
     }
@@ -269,6 +286,7 @@ extension DriverClient {
         tap: { _ in throw LassoError.commandFailed("DriverClient.failing: tap", 1) },
         swipe: { _ in throw LassoError.commandFailed("DriverClient.failing: swipe", 1) },
         typeText: { _ in throw LassoError.commandFailed("DriverClient.failing: typeText", 1) },
-        pageSource: { throw LassoError.commandFailed("DriverClient.failing: pageSource", 1) }
+        pageSource: { throw LassoError.commandFailed("DriverClient.failing: pageSource", 1) },
+        screenshot: { throw LassoError.commandFailed("DriverClient.failing: screenshot", 1) }
     )
 }

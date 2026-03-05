@@ -32,6 +32,8 @@ struct DiffCommand: AsyncParsableCommand {
         @Flag(name: .long, inversion: .prefixedNo, help: "Build, install, and launch app before capturing (default: true)")
         var run: Bool = true
 
+        var simulatorManager: SimulatorManager = .live
+
         func run() async throws {
             let config = try? LassoConfig.load()
             let resolved = try await ResolvedProject.resolve(
@@ -48,7 +50,7 @@ struct DiffCommand: AsyncParsableCommand {
             var device: SimulatorDevice
             if self.run {
                 // Full lifecycle: boot → build → install → launch → (driver) → capture
-                device = try await SimulatorManager.live.boot(nameOrUDID: resolved.simulator)
+                device = try await simulatorManager.boot(nameOrUDID: resolved.simulator)
                 let destination = "platform=iOS Simulator,name=\(device.name)"
 
                 if !options.json {
@@ -88,33 +90,25 @@ struct DiffCommand: AsyncParsableCommand {
                 }
             } else {
                 // No-run mode: just use the currently booted simulator
-                device = try await SimulatorManager.live.bootedDevice()
+                device = try await simulatorManager.bootedDevice()
             }
 
-            // Start driver if screens need navigation steps
-            var driverManager: DriverManager?
-            if resolved.screens.hasNavigationSteps {
-                let driverConfig = DriverConfig(
-                    targetBundleId: resolved.bundleId,
-                    simulatorName: device.name,
-                    port: options.driverPort
-                )
-                let manager = DriverManager.live()
-                if !options.json {
-                    print("Starting driver for navigation...")
-                }
-                try await manager.start(driverConfig)
-                driverManager = manager
+            // Start driver (needed for screenshots on headless CI + navigation)
+            if !options.json {
+                print("Starting driver...")
             }
+            let session = try await DriverSession.start(
+                udid: device.udid,
+                bundleId: resolved.bundleId,
+                simulatorName: device.name,
+                port: options.driverPort
+            )
 
             defer {
-                if let manager = driverManager {
-                    Task { try? await manager.stop() }
-                }
+                Task { await session.stop() }
             }
 
-            let ui = options.makeUIAutomation(udid: device.udid)
-            let captures = try await ScreenNavigator.live.captureAll(resolved.screens, ui, outputDir)
+            let captures = try await session.captureAll(resolved.screens, outputDir)
 
             let result = CaptureResult(
                 screens: captures,
@@ -152,6 +146,9 @@ struct DiffCommand: AsyncParsableCommand {
         @Flag(name: .long, help: "Capture screenshots before comparing (runs full lifecycle)")
         var capture = false
 
+        var simulatorManager: SimulatorManager = .live
+        var imageDiffer: ImageDiffer = .live
+
         func run() async throws {
             let config = try? LassoConfig.load()
             let captureDir = ".lasso/captures"
@@ -169,7 +166,7 @@ struct DiffCommand: AsyncParsableCommand {
                 }
 
                 // Full lifecycle: boot → build → install → launch → capture
-                let device = try await SimulatorManager.live.boot(nameOrUDID: resolved.simulator)
+                let device = try await simulatorManager.boot(nameOrUDID: resolved.simulator)
                 let destination = "platform=iOS Simulator,name=\(device.name)"
 
                 if !options.json {
@@ -202,40 +199,32 @@ struct DiffCommand: AsyncParsableCommand {
                     try await Task.sleep(for: .seconds(2))
                 }
 
-                // Start driver if needed
-                var driverManager: DriverManager?
-                if resolved.screens.hasNavigationSteps {
-                    let driverConfig = DriverConfig(
-                        targetBundleId: resolved.bundleId,
-                        simulatorName: device.name,
-                        port: options.driverPort
-                    )
-                    let manager = DriverManager.live()
-                    if !options.json {
-                        print("Starting driver for navigation...")
-                    }
-                    try await manager.start(driverConfig)
-                    driverManager = manager
+                // Start driver (needed for screenshots on headless CI + navigation)
+                if !options.json {
+                    print("Starting driver...")
                 }
+                let session = try await DriverSession.start(
+                    udid: device.udid,
+                    bundleId: resolved.bundleId,
+                    simulatorName: device.name,
+                    port: options.driverPort
+                )
 
                 defer {
-                    if let manager = driverManager {
-                        Task { try? await manager.stop() }
-                    }
+                    Task { await session.stop() }
                 }
 
                 if !options.json {
                     print("Capturing \(resolved.screens.count) screen(s)...")
                 }
 
-                let ui = options.makeUIAutomation(udid: device.udid)
-                _ = try await ScreenNavigator.live.captureAll(resolved.screens, ui, captureDir)
+                _ = try await session.captureAll(resolved.screens, captureDir)
             }
 
             let diffConfig = config?.diff ?? .init()
             let fm = FileManager.default
             let store = try await DiffCommand.resolveBaselineStore()
-            let differ = ImageDiffer.live
+            let differ = imageDiffer
 
             // Create diffs directory
             if !fm.fileExists(atPath: diffDir) {
@@ -401,13 +390,11 @@ struct DiffCommand: AsyncParsableCommand {
     // MARK: - Baseline Store Resolution
 
     /// Resolves the baseline store: remote (via RangeClient) if authenticated, local otherwise.
-    private static func resolveBaselineStore() async throws -> BaselineStore {
+    static func resolveBaselineStore() async throws -> BaselineStore {
         if let credentials = AuthStore.resolveCredentials() {
-            let client = RangeClient.live(apiKey: credentials.apiKey, baseURL: credentials.baseURL)
-            let identifier = ProjectIdentifier.live
-            let project = try await identifier.projectSlug()
-            let branch = try await identifier.currentBranch()
-            return client.asBaselineStore(project: project, branch: branch)
+            let client = RangeClient(apiKey: credentials.apiKey, baseURL: credentials.baseURL)
+            let projectId = try await ProjectIdentifier.resolve()
+            return client.asBaselineStore(project: projectId.projectSlug, branch: projectId.currentBranch)
         }
         return .local()
     }

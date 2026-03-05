@@ -29,12 +29,15 @@ struct DriverBuildCommand: AsyncParsableCommand {
 
     @OptionGroup var options: GlobalOptions
 
+    var simulatorManager: SimulatorManager = .live
+    var driverCache: DriverCache = .live
+
     func run() async throws {
         let simName: String
         if let simulator {
             simName = simulator
         } else {
-            let booted = try await SimulatorManager.live.bootedDevice()
+            let booted = try await simulatorManager.bootedDevice()
             simName = booted.name
         }
 
@@ -42,7 +45,7 @@ struct DriverBuildCommand: AsyncParsableCommand {
             print("Building driver for \(simName)...")
         }
 
-        let cache = DriverCache.live
+        let cache = driverCache
         try await cache.buildAndCache(simName)
 
         if options.json {
@@ -78,13 +81,15 @@ struct DriverStartCommand: AsyncParsableCommand {
 
     @OptionGroup var options: GlobalOptions
 
+    var simulatorManager: SimulatorManager = .live
+
     func run() async throws {
         // Resolve simulator
         let simName: String
         if let simulator {
             simName = simulator
         } else {
-            let booted = try await SimulatorManager.live.bootedDevice()
+            let booted = try await simulatorManager.bootedDevice()
             simName = booted.name
         }
 
@@ -98,7 +103,7 @@ struct DriverStartCommand: AsyncParsableCommand {
             print("Starting driver (simulator: \(simName), port: \(port))...")
         }
 
-        let manager = DriverManager.live()
+        let manager = DriverManager()
         try await manager.start(config)
 
         if options.json {

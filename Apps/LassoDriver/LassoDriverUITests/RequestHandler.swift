@@ -132,6 +132,15 @@ final class RequestHandler: @unchecked Sendable {
         return .json("{\"action\":\"type\",\"text\":\(escapeJSON(text)),\"success\":true}")
     }
 
+    // MARK: - Screenshot
+
+    func screenshot() -> DriverServer.Response {
+        let screenshot = XCUIScreen.main.screenshot()
+        let pngData = screenshot.pngRepresentation
+        let base64 = pngData.base64EncodedString()
+        return .json("{\"format\":\"png\",\"encoding\":\"base64\",\"data\":\"\(base64)\"}")
+    }
+
     // MARK: - Serialization
 
     private func serializeElement(_ element: XCUIElementSnapshot, depth: Int = 0) -> String {

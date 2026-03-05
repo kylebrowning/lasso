@@ -16,6 +16,8 @@ struct RunCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Simulator name")
     var simulator: String?
 
+    var simulatorManager: SimulatorManager = .live
+
     func run() async throws {
         let config = try? LassoConfig.load()
         let schemeName = scheme ?? config?.scheme
@@ -25,7 +27,7 @@ struct RunCommand: AsyncParsableCommand {
         let sim = simulator ?? config?.simulator ?? "iPhone 16"
 
         // Boot simulator if needed
-        let device = try await SimulatorManager.live.boot(nameOrUDID: sim)
+        let device = try await simulatorManager.boot(nameOrUDID: sim)
         let destination = "platform=iOS Simulator,name=\(device.name)"
 
         var productPath: String?

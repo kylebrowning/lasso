@@ -19,8 +19,10 @@ struct SimCommand: AsyncParsableCommand {
         @Flag(name: .long, help: "Show only available simulators")
         var available = false
 
+        var simulatorManager: SimulatorManager = .live
+
         func run() async throws {
-            var devices = try await SimulatorManager.live.listDevices()
+            var devices = try await simulatorManager.listDevices()
             if available {
                 devices = devices.filter(\.isAvailable)
             }
@@ -44,8 +46,10 @@ struct SimCommand: AsyncParsableCommand {
 
         @OptionGroup var options: GlobalOptions
 
+        var simulatorManager: SimulatorManager = .live
+
         func run() async throws {
-            let device = try await SimulatorManager.live.boot(nameOrUDID: nameOrUDID)
+            let device = try await simulatorManager.boot(nameOrUDID: nameOrUDID)
 
             if options.json {
                 print(try JSONOutput.string(device))

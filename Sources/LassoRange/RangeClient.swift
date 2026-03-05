@@ -31,14 +31,14 @@ public struct RangeClient: Sendable {
     }
 }
 
-// MARK: - Live
+// MARK: - Convenience Init
 
 extension RangeClient {
-    public static func live(apiKey: String, baseURL: String) -> RangeClient {
+    public init(apiKey: String, baseURL: String) {
         let baseURL = URL(string: baseURL.hasSuffix("/") ? String(baseURL.dropLast()) : baseURL)!
         let client = NetworkClient.authorized(apiKey: apiKey)
 
-        return RangeClient(
+        self.init(
             me: {
                 try await client.execute(AuthEndpoints.me(), baseURL: baseURL)
             },
