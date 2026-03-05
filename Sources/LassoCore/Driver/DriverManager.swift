@@ -36,13 +36,13 @@ public struct DriverManager: Sendable {
     }
 }
 
-// MARK: - Live Implementation
+// MARK: - Convenience Init
 
 extension DriverManager {
-    public static func live(cache: DriverCache = .live) -> DriverManager {
+    public init(cache: DriverCache = .live) {
         let state = DriverProcessState()
 
-        return DriverManager(
+        self.init(
             start: { config in
                 // Ensure driver is cached and valid
                 if !(await cache.isValid()) {

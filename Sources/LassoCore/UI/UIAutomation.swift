@@ -38,6 +38,12 @@ public struct UIAutomation: Sendable {
     // MARK: - Screenshot
 
     public func screenshot() async throws -> Data {
+        // Prefer driver-based screenshot (works on headless CI, like Maestro)
+        if let data = try? await client.screenshot() {
+            return data
+        }
+
+        // Fallback: simctl io screenshot (requires screen surfaces)
         let tmpFile = FileManager.default.temporaryDirectory
             .appendingPathComponent("lasso_screenshot_\(UUID().uuidString).png")
         _ = try await shell("xcrun simctl io \(udid) screenshot \(tmpFile.path)")

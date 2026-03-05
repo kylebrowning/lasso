@@ -17,8 +17,10 @@ struct ScreenshotCommand: AsyncParsableCommand {
 
     @OptionGroup var options: GlobalOptions
 
+    var simulatorManager: SimulatorManager = .live
+
     func run() async throws {
-        let udid = try await SimulatorManager.live.bootedUDID()
+        let udid = try await simulatorManager.bootedUDID()
         let data = try await options.makeUIAutomation(udid: udid).screenshot()
 
         if base64 || options.json {

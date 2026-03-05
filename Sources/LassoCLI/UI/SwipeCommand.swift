@@ -25,8 +25,10 @@ struct SwipeCommand: AsyncParsableCommand {
 
     @OptionGroup var options: GlobalOptions
 
+    var simulatorManager: SimulatorManager = .live
+
     func run() async throws {
-        let udid = try await SimulatorManager.live.bootedUDID()
+        let udid = try await simulatorManager.bootedUDID()
         let ui = options.makeUIAutomation(udid: udid)
 
         if let direction {

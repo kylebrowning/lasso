@@ -26,6 +26,8 @@ struct AuthCommand: AsyncParsableCommand {
         @Option(name: .long, help: "Base URL for Lasso Range API")
         var baseURL: String = LassoDefaults.apiBaseURL
 
+        var authStore: AuthStore = .live
+
         func run() async throws {
             if let apiKey {
                 try await loginWithAPIKey(apiKey)
@@ -64,7 +66,7 @@ struct AuthCommand: AsyncParsableCommand {
                 baseURL: baseURL,
                 email: meResponse.email
             )
-            try AuthStore.live.save(credentials)
+            try authStore.save(credentials)
 
             if options.json {
                 let result = LoginResult(
@@ -143,7 +145,7 @@ struct AuthCommand: AsyncParsableCommand {
                         baseURL: baseURL,
                         email: email
                     )
-                    try AuthStore.live.save(credentials)
+                    try authStore.save(credentials)
 
                     let prefix = String(apiKey.prefix(8))
 
@@ -185,6 +187,8 @@ struct AuthCommand: AsyncParsableCommand {
 
         @OptionGroup var options: GlobalOptions
 
+        var authStore: AuthStore = .live
+
         func run() async throws {
             let env = ProcessInfo.processInfo.environment
 
@@ -209,7 +213,7 @@ struct AuthCommand: AsyncParsableCommand {
                 return
             }
 
-            if let credentials = AuthStore.live.load() {
+            if let credentials = authStore.load() {
                 let prefix = String(credentials.apiKey.prefix(8))
 
                 if options.json {
@@ -257,8 +261,10 @@ struct AuthCommand: AsyncParsableCommand {
 
         @OptionGroup var options: GlobalOptions
 
+        var authStore: AuthStore = .live
+
         func run() async throws {
-            try AuthStore.live.delete()
+            try authStore.delete()
 
             if options.json {
                 let result = LogoutResult(success: true, message: "Credentials removed")

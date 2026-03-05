@@ -18,7 +18,8 @@ public struct DiffOutput: Sendable {
 
 // MARK: - ImageDiffer
 
-public struct ImageDiffer: Sendable {
+public struct ImageDiffer: Sendable, Decodable {
+    public init(from decoder: Decoder) throws { self = .live }
     public var compare: @Sendable (Data, Data) throws -> DiffOutput
 
     public init(compare: @escaping @Sendable (Data, Data) throws -> DiffOutput) {

@@ -10,6 +10,8 @@ struct ContextCommand: AsyncParsableCommand {
 
     @OptionGroup var options: GlobalOptions
 
+    var simulatorManager: SimulatorManager = .live
+
     func run() async throws {
         var context: [String: String] = [:]
 
@@ -23,7 +25,7 @@ struct ContextCommand: AsyncParsableCommand {
         }
 
         // Booted simulator
-        if let device = try? await SimulatorManager.live.bootedDevice() {
+        if let device = try? await simulatorManager.bootedDevice() {
             context["booted_simulator"] = device.name
             context["booted_udid"] = device.udid
             context["booted_runtime"] = device.runtime

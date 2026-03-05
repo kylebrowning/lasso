@@ -180,6 +180,8 @@ final class DriverServer: @unchecked Sendable {
             return handler.typeText(body: body)
         case ("GET", "/source"):
             return handler.pageSource()
+        case ("GET", "/screenshot"):
+            return handler.screenshot()
         default:
             return .error("Not found: \(method) \(path)", status: 404)
         }

@@ -30,6 +30,10 @@ struct CICommand: AsyncParsableCommand {
         @Option(name: .long, help: "Bundle identifier")
         var bundleId: String?
 
+        var simulatorManager: SimulatorManager = .live
+        var driverCache: DriverCache = .live
+        var imageDiffer: ImageDiffer = .live
+
         /// Log a step to stderr so CI sees it immediately (stdout is buffered).
         func log(_ message: String) {
             guard !options.json else { return }
@@ -58,10 +62,10 @@ struct CICommand: AsyncParsableCommand {
             }
             log("Authenticated with \(credentials.baseURL)")
 
-            let client = RangeClient.live(apiKey: credentials.apiKey, baseURL: credentials.baseURL)
-            let identifier = ProjectIdentifier.live
-            let project = try await identifier.projectSlug()
-            let branch = try await identifier.currentBranch()
+            let client = RangeClient(apiKey: credentials.apiKey, baseURL: credentials.baseURL)
+            let projectId = try await ProjectIdentifier.resolve()
+            let project = projectId.projectSlug
+            let branch = projectId.currentBranch
             log("Project: \(project) Branch: \(branch)")
 
             // Get commit SHA (best effort)
@@ -71,11 +75,10 @@ struct CICommand: AsyncParsableCommand {
             let trigger = ProcessInfo.processInfo.environment["CI"] != nil ? "ci" : "manual"
 
             // 0. Preflight: ensure driver is available before expensive build
-            let needsDriver = resolved.screens.hasNavigationSteps
-            let driverCache = DriverCache.live
+            // Always need the driver on CI — simctl io screenshot fails on headless runners
             let driverCacheValid = await driverCache.isValid()
-            log("Driver needed: \(needsDriver), cache valid: \(driverCacheValid)")
-            if needsDriver && !driverCacheValid {
+            log("Driver cache valid: \(driverCacheValid)")
+            if !driverCacheValid {
                 log("Preparing driver cache...")
                 try await driverCache.buildAndCache(resolved.simulator)
                 log("Driver cache ready")
@@ -83,7 +86,7 @@ struct CICommand: AsyncParsableCommand {
 
             // 1. Boot → Build → Install → Launch → Capture
             log("Booting simulator: \(resolved.simulator)")
-            let device = try await SimulatorManager.live.boot(nameOrUDID: resolved.simulator)
+            let device = try await simulatorManager.boot(nameOrUDID: resolved.simulator)
             log("Simulator booted: \(device.name) (\(device.udid))")
             let destination = "platform=iOS Simulator,name=\(device.name)"
 
@@ -129,38 +132,31 @@ struct CICommand: AsyncParsableCommand {
                 try await Task.sleep(for: .seconds(2))
             }
 
-            // Start driver if needed (cache was pre-validated above)
-            var driverManager: DriverManager?
-            if needsDriver {
-                let driverConfig = DriverConfig(
-                    targetBundleId: resolved.bundleId,
-                    simulatorName: device.name,
-                    port: options.driverPort
-                )
-                let manager = DriverManager.live(cache: driverCache)
-                log("Starting driver on port \(options.driverPort)...")
-                try await manager.start(driverConfig)
-                log("Driver healthy")
-                driverManager = manager
-            }
+            // Start driver (needed for screenshots on headless CI + navigation)
+            log("Starting driver on port \(options.driverPort)...")
+            let session = try await DriverSession.start(
+                udid: device.udid,
+                bundleId: resolved.bundleId,
+                simulatorName: device.name,
+                port: options.driverPort,
+                cache: driverCache
+            )
+            log("Driver healthy")
 
             defer {
-                if let manager = driverManager {
-                    Task { try? await manager.stop() }
-                }
+                Task { await session.stop() }
             }
 
             log("Capturing \(resolved.screens.count) screen(s)...")
 
-            let ui = options.makeUIAutomation(udid: device.udid)
-            _ = try await ScreenNavigator.live.captureAll(resolved.screens, ui, captureDir)
+            _ = try await session.captureAll(resolved.screens, captureDir)
             log("Capture complete")
 
             // 2. Compare against baselines
             let diffConfig = config?.diff ?? .init()
             let fm = FileManager.default
             let store = client.asBaselineStore(project: project, branch: branch)
-            let differ = ImageDiffer.live
+            let differ = imageDiffer
 
             if !fm.fileExists(atPath: diffDir) {
                 try fm.createDirectory(atPath: diffDir, withIntermediateDirectories: true)

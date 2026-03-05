@@ -1,6 +1,6 @@
 import Foundation
 
-public struct SimulatorManager: Sendable {
+public struct SimulatorManager: Sendable, Decodable {
     public static let live = SimulatorManager()
 
     public init() {}

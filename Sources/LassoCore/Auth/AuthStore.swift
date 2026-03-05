@@ -22,7 +22,8 @@ public struct AuthCredentials: Codable, Sendable {
 
 // MARK: - AuthStore
 
-public struct AuthStore: Sendable {
+public struct AuthStore: Sendable, Decodable {
+    public init(from decoder: Decoder) throws { self = .live }
     public var load: @Sendable () -> AuthCredentials?
     public var save: @Sendable (AuthCredentials) throws -> Void
     public var delete: @Sendable () throws -> Void

@@ -11,7 +11,8 @@ public struct DriverInfo: Codable, Sendable {
 
 // MARK: - DriverCache
 
-public struct DriverCache: Sendable {
+public struct DriverCache: Sendable, Decodable {
+    public init(from decoder: Decoder) throws { self = .live }
     public var isValid: @Sendable () async -> Bool
     public var cachedXCTestRunPath: @Sendable () -> String?
     public var cachedXCTestBundlePath: @Sendable () -> String?
