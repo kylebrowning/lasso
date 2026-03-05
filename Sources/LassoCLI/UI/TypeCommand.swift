@@ -14,7 +14,7 @@ struct TypeCommand: AsyncParsableCommand {
     @OptionGroup var options: GlobalOptions
 
     func run() async throws {
-        let udid = try await SimulatorManager().bootedUDID()
+        let udid = try await SimulatorManager.live.bootedUDID()
         try await options.makeUIAutomation(udid: udid).type(text)
 
         if options.json {

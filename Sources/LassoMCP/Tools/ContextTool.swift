@@ -26,7 +26,7 @@ func handleContext(config: LassoConfig?) async throws -> CallTool.Result {
         if let bid = config.bundleId { context["bundle_id"] = bid }
     }
 
-    if let device = try? await SimulatorManager().bootedDevice() {
+    if let device = try? await SimulatorManager.live.bootedDevice() {
         context["booted_simulator"] = device.name
         context["booted_udid"] = device.udid
         context["booted_runtime"] = device.runtime

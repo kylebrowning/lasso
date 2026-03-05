@@ -83,7 +83,7 @@ struct CICommand: AsyncParsableCommand {
 
             // 1. Boot → Build → Install → Launch → Capture
             log("Booting simulator: \(resolved.simulator)")
-            let device = try await SimulatorManager().boot(nameOrUDID: resolved.simulator)
+            let device = try await SimulatorManager.live.boot(nameOrUDID: resolved.simulator)
             log("Simulator booted: \(device.name) (\(device.udid))")
             let destination = "platform=iOS Simulator,name=\(device.name)"
 

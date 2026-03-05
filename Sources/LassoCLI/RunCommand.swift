@@ -25,7 +25,7 @@ struct RunCommand: AsyncParsableCommand {
         let sim = simulator ?? config?.simulator ?? "iPhone 16"
 
         // Boot simulator if needed
-        let device = try await SimulatorManager().boot(nameOrUDID: sim)
+        let device = try await SimulatorManager.live.boot(nameOrUDID: sim)
         let destination = "platform=iOS Simulator,name=\(device.name)"
 
         var productPath: String?

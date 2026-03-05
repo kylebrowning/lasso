@@ -34,7 +34,7 @@ struct DriverBuildCommand: AsyncParsableCommand {
         if let simulator {
             simName = simulator
         } else {
-            let booted = try await SimulatorManager().bootedDevice()
+            let booted = try await SimulatorManager.live.bootedDevice()
             simName = booted.name
         }
 
@@ -84,7 +84,7 @@ struct DriverStartCommand: AsyncParsableCommand {
         if let simulator {
             simName = simulator
         } else {
-            let booted = try await SimulatorManager().bootedDevice()
+            let booted = try await SimulatorManager.live.bootedDevice()
             simName = booted.name
         }
 

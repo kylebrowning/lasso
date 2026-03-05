@@ -160,7 +160,7 @@ func handleRun(arguments: [String: Value]?, config: LassoConfig?) async throws -
     }
 
     // Install + Launch
-    let udid = try await SimulatorManager().bootedUDID()
+    let udid = try await SimulatorManager.live.bootedUDID()
     if let productPath {
         try await runner.install(bundleId: bundleId, productPath: productPath, udid: udid)
     }

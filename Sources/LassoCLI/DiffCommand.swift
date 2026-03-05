@@ -48,7 +48,7 @@ struct DiffCommand: AsyncParsableCommand {
             var device: SimulatorDevice
             if self.run {
                 // Full lifecycle: boot → build → install → launch → (driver) → capture
-                device = try await SimulatorManager().boot(nameOrUDID: resolved.simulator)
+                device = try await SimulatorManager.live.boot(nameOrUDID: resolved.simulator)
                 let destination = "platform=iOS Simulator,name=\(device.name)"
 
                 if !options.json {
@@ -88,7 +88,7 @@ struct DiffCommand: AsyncParsableCommand {
                 }
             } else {
                 // No-run mode: just use the currently booted simulator
-                device = try await SimulatorManager().bootedDevice()
+                device = try await SimulatorManager.live.bootedDevice()
             }
 
             // Start driver if screens need navigation steps
@@ -169,7 +169,7 @@ struct DiffCommand: AsyncParsableCommand {
                 }
 
                 // Full lifecycle: boot → build → install → launch → capture
-                let device = try await SimulatorManager().boot(nameOrUDID: resolved.simulator)
+                let device = try await SimulatorManager.live.boot(nameOrUDID: resolved.simulator)
                 let destination = "platform=iOS Simulator,name=\(device.name)"
 
                 if !options.json {

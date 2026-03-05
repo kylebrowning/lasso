@@ -33,7 +33,7 @@ let simTools: [Tool] = [simListTool, simBootTool]
 // MARK: - Handlers
 
 func handleSimList() async throws -> CallTool.Result {
-    let devices = try await SimulatorManager().listDevices()
+    let devices = try await SimulatorManager.live.listDevices()
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
     let data = try encoder.encode(devices)
@@ -45,7 +45,7 @@ func handleSimBoot(arguments: [String: Value]?) async throws -> CallTool.Result 
     guard let nameOrUDID = arguments?["name_or_udid"]?.stringValue else {
         return CallTool.Result(content: [.text("Error: 'name_or_udid' is required")], isError: true)
     }
-    let device = try await SimulatorManager().boot(nameOrUDID: nameOrUDID)
+    let device = try await SimulatorManager.live.boot(nameOrUDID: nameOrUDID)
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
     let data = try encoder.encode(device)

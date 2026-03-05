@@ -89,7 +89,7 @@ let uiTools: [Tool] = [screenshotTool, tapTool, swipeTool, typeTool, a11yTreeToo
 // MARK: - Handlers
 
 func handleScreenshot(config: LassoConfig?, driverPort: UInt16) async throws -> CallTool.Result {
-    let udid = try await SimulatorManager().bootedUDID()
+    let udid = try await SimulatorManager.live.bootedUDID()
     let ui = UIAutomation(udid: udid, driverClient: .live(port: driverPort))
     let data = try await ui.screenshot()
     let base64 = data.base64EncodedString()
@@ -97,7 +97,7 @@ func handleScreenshot(config: LassoConfig?, driverPort: UInt16) async throws -> 
 }
 
 func handleTap(arguments: [String: Value]?, config: LassoConfig?, driverPort: UInt16) async throws -> CallTool.Result {
-    let udid = try await SimulatorManager().bootedUDID()
+    let udid = try await SimulatorManager.live.bootedUDID()
     let ui = UIAutomation(udid: udid, driverClient: .live(port: driverPort))
 
     if let label = arguments?["label"]?.stringValue {
@@ -116,7 +116,7 @@ func handleSwipe(arguments: [String: Value]?, config: LassoConfig?, driverPort: 
           let direction = SwipeDirection(rawValue: dirStr) else {
         return CallTool.Result(content: [.text("Error: 'direction' must be one of: up, down, left, right")], isError: true)
     }
-    let udid = try await SimulatorManager().bootedUDID()
+    let udid = try await SimulatorManager.live.bootedUDID()
     let ui = UIAutomation(udid: udid, driverClient: .live(port: driverPort))
     try await ui.swipe(direction: direction)
     return CallTool.Result(content: [.text("Swiped \(dirStr)")])
@@ -126,14 +126,14 @@ func handleType(arguments: [String: Value]?, config: LassoConfig?, driverPort: U
     guard let text = arguments?["text"]?.stringValue else {
         return CallTool.Result(content: [.text("Error: 'text' parameter is required")], isError: true)
     }
-    let udid = try await SimulatorManager().bootedUDID()
+    let udid = try await SimulatorManager.live.bootedUDID()
     let ui = UIAutomation(udid: udid, driverClient: .live(port: driverPort))
     try await ui.type(text)
     return CallTool.Result(content: [.text("Typed: \"\(text)\"")])
 }
 
 func handleA11yTree(config: LassoConfig?, driverPort: UInt16) async throws -> CallTool.Result {
-    let udid = try await SimulatorManager().bootedUDID()
+    let udid = try await SimulatorManager.live.bootedUDID()
     let ui = UIAutomation(udid: udid, driverClient: .live(port: driverPort))
     let tree = try await ui.hierarchy()
     let encoder = JSONEncoder()
@@ -144,7 +144,7 @@ func handleA11yTree(config: LassoConfig?, driverPort: UInt16) async throws -> Ca
 }
 
 func handleA11yCheck(config: LassoConfig?, driverPort: UInt16) async throws -> CallTool.Result {
-    let udid = try await SimulatorManager().bootedUDID()
+    let udid = try await SimulatorManager.live.bootedUDID()
     let ui = UIAutomation(udid: udid, driverClient: .live(port: driverPort))
     let violations = try await ui.accessibilityViolations()
     if violations.isEmpty {

@@ -47,7 +47,7 @@ public struct DoctorRunner: Sendable {
 
     func checkBootedSimulator() async -> DoctorCheck {
         do {
-            let device = try await SimulatorManager().bootedDevice()
+            let device = try await SimulatorManager.live.bootedDevice()
             return DoctorCheck(
                 name: "Booted Simulator", status: .ok,
                 message: "\(device.name) — \(device.runtime)", fix: nil

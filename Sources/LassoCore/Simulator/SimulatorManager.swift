@@ -1,6 +1,8 @@
 import Foundation
 
 public struct SimulatorManager: Sendable {
+    public static let live = SimulatorManager()
+
     public init() {}
 
     public func listDevices() async throws -> [SimulatorDevice] {

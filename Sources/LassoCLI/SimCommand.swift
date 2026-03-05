@@ -20,7 +20,7 @@ struct SimCommand: AsyncParsableCommand {
         var available = false
 
         func run() async throws {
-            var devices = try await SimulatorManager().listDevices()
+            var devices = try await SimulatorManager.live.listDevices()
             if available {
                 devices = devices.filter(\.isAvailable)
             }
@@ -45,7 +45,7 @@ struct SimCommand: AsyncParsableCommand {
         @OptionGroup var options: GlobalOptions
 
         func run() async throws {
-            let device = try await SimulatorManager().boot(nameOrUDID: nameOrUDID)
+            let device = try await SimulatorManager.live.boot(nameOrUDID: nameOrUDID)
 
             if options.json {
                 print(try JSONOutput.string(device))
