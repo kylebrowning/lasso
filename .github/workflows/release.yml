@@ -24,6 +24,11 @@ jobs:
           strip "$BINARY"
           tar -czf "lasso-${{ github.ref_name }}-macos.tar.gz" -C "$(dirname "$BINARY")" lasso
 
+      - name: Create simulator for driver build
+        run: |
+          RUNTIME=$(xcrun simctl list runtimes iOS -j | python3 -c "import sys,json; rts=json.load(sys.stdin)['runtimes']; print(rts[-1]['identifier']) if rts else sys.exit(1)")
+          xcrun simctl create "iPhone 16" "iPhone 16" "$RUNTIME"
+
       - name: Build and package driver
         run: |
           xcodebuild build-for-testing \

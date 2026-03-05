@@ -61,6 +61,17 @@ struct CICommand: AsyncParsableCommand {
             // Determine trigger
             let trigger = ProcessInfo.processInfo.environment["CI"] != nil ? "ci" : "manual"
 
+            // 0. Preflight: ensure driver is available before expensive build
+            let needsDriver = resolved.screens.hasNavigationSteps
+            let driverCache = DriverCache.live
+            let driverCacheValid = await driverCache.isValid()
+            if needsDriver && !driverCacheValid {
+                if !options.json {
+                    print("Preparing driver cache...")
+                }
+                try await driverCache.buildAndCache(resolved.simulator)
+            }
+
             // 1. Boot → Build → Install → Launch → Capture
             let device = try await SimulatorManager().boot(nameOrUDID: resolved.simulator)
             let destination = "platform=iOS Simulator,name=\(device.name)"
@@ -108,15 +119,15 @@ struct CICommand: AsyncParsableCommand {
                 try await Task.sleep(for: .seconds(2))
             }
 
-            // Start driver if needed
+            // Start driver if needed (cache was pre-validated above)
             var driverManager: DriverManager?
-            if resolved.screens.hasNavigationSteps {
+            if needsDriver {
                 let driverConfig = DriverConfig(
                     targetBundleId: resolved.bundleId,
                     simulatorName: device.name,
                     port: options.driverPort
                 )
-                let manager = DriverManager.live()
+                let manager = DriverManager.live(cache: driverCache)
                 if !options.json {
                     print("Starting driver for navigation...")
                 }
