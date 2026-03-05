@@ -29,7 +29,7 @@ extension NetworkClient {
         case .post:
             let body = try endpoint.body.map { try JSONEncoder().encode($0) }
             responseData = try await post(url, body)
-        case .put:
+        case .put, .patch:
             let body = try endpoint.body.map { try JSONEncoder().encode($0) }
             responseData = try await put(url, body)
         case .delete:

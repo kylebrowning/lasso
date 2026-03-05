@@ -5,17 +5,22 @@ public struct DoctorRunner: Sendable {
 
     public func runAllChecks() async -> [DoctorCheck] {
         var checks: [DoctorCheck] = []
+
+        // Required
         checks.append(await checkXcode())
         checks.append(await checkXcodeVersion())
         checks.append(await checkBootedSimulator())
         checks.append(await checkSimctlType())
-        checks.append(checkAccessibilityPermission())
-        checks.append(await checkAXe())
-        checks.append(checkGitRepository())
+        checks.append(await checkDriverCache())
+
+        // Project
         checks.append(checkLassoConfig())
+        checks.append(checkGitRepository())
+
+        // CI / Cloud
         checks.append(checkLassoAuth())
         checks.append(checkGitHubToken())
-        checks.append(await checkDriverCache())
+
         return checks
     }
 
@@ -84,90 +89,6 @@ public struct DoctorRunner: Sendable {
         }
     }
 
-    func checkAccessibilityPermission() -> DoctorCheck {
-        DoctorCheck(
-            name: "Accessibility Permission", status: .warning,
-            message: "Run lasso doctor from a terminal with Accessibility permission",
-            fix: "System Settings -> Privacy & Security -> Accessibility -> enable your terminal"
-        )
-    }
-
-    func checkAXe() async -> DoctorCheck {
-        guard let path = which("axe") else {
-            return DoctorCheck(
-                name: "AXe (optional)", status: .warning,
-                message: "Not installed. CGEvent fallback active. Custom gesture recognizers may not respond.",
-                fix: "brew install AXErunner/axe/axe"
-            )
-        }
-        do {
-            let version = try await shell("\(path) --version")
-            return DoctorCheck(
-                name: "AXe (optional)", status: .ok,
-                message: "Found — \(version). Full gesture support enabled.", fix: nil
-            )
-        } catch {
-            return DoctorCheck(
-                name: "AXe (optional)", status: .ok,
-                message: "Found at \(path)", fix: nil
-            )
-        }
-    }
-
-    func checkGitRepository() -> DoctorCheck {
-        if FileManager.default.fileExists(atPath: ".git") {
-            return DoctorCheck(name: "Git Repository", status: .ok, message: "Detected", fix: nil)
-        }
-        return DoctorCheck(
-            name: "Git Repository", status: .warning,
-            message: "Not a git repository",
-            fix: "Run: git init"
-        )
-    }
-
-    func checkLassoConfig() -> DoctorCheck {
-        if FileManager.default.fileExists(atPath: "lasso.yml") {
-            return DoctorCheck(name: "lasso.yml", status: .ok, message: "Found", fix: nil)
-        }
-        return DoctorCheck(
-            name: "lasso.yml", status: .warning,
-            message: "Not found",
-            fix: "Run: lasso init"
-        )
-    }
-
-    func checkLassoAuth() -> DoctorCheck {
-        if ProcessInfo.processInfo.environment["LASSO_API_KEY"] != nil {
-            return DoctorCheck(
-                name: "Lasso Range Auth", status: .ok,
-                message: "Authenticated via LASSO_API_KEY", fix: nil
-            )
-        }
-        if let credentials = AuthStore.live.load() {
-            let prefix = String(credentials.apiKey.prefix(8))
-            return DoctorCheck(
-                name: "Lasso Range Auth", status: .ok,
-                message: "Authenticated via ~/.lasso/auth.json (\(prefix)...)", fix: nil
-            )
-        }
-        return DoctorCheck(
-            name: "Lasso Range Auth", status: .warning,
-            message: "Not authenticated — remote baselines unavailable",
-            fix: "Run: lasso auth login"
-        )
-    }
-
-    func checkGitHubToken() -> DoctorCheck {
-        if ProcessInfo.processInfo.environment["GITHUB_TOKEN"] != nil {
-            return DoctorCheck(name: "GitHub Token", status: .ok, message: "GITHUB_TOKEN set", fix: nil)
-        }
-        return DoctorCheck(
-            name: "GitHub Token", status: .warning,
-            message: "GITHUB_TOKEN not set",
-            fix: "Export GITHUB_TOKEN for PR comment posting"
-        )
-    }
-
     func checkDriverCache() async -> DoctorCheck {
         let cache = DriverCache.live
         if await cache.isValid() {
@@ -181,7 +102,6 @@ public struct DoctorRunner: Sendable {
             return DoctorCheck(name: "Driver Cache", status: .ok, message: "Valid", fix: nil)
         }
 
-        // Check if stale vs missing
         if DriverCache.loadInfo() != nil {
             return DoctorCheck(
                 name: "Driver Cache", status: .warning,
@@ -191,8 +111,66 @@ public struct DoctorRunner: Sendable {
         }
         return DoctorCheck(
             name: "Driver Cache", status: .warning,
-            message: "Not built — UI automation with navigation requires the driver",
+            message: "Not built — UI automation requires the driver",
             fix: "Run: lasso driver build"
+        )
+    }
+
+    func checkLassoConfig() -> DoctorCheck {
+        if FileManager.default.fileExists(atPath: "lasso.yml") {
+            return DoctorCheck(name: "lasso.yml", status: .ok, message: "Found", fix: nil, section: .project)
+        }
+        return DoctorCheck(
+            name: "lasso.yml", status: .warning,
+            message: "Not found",
+            fix: "Run: lasso init",
+            section: .project
+        )
+    }
+
+    func checkGitRepository() -> DoctorCheck {
+        if FileManager.default.fileExists(atPath: ".git") {
+            return DoctorCheck(name: "Git Repository", status: .ok, message: "Detected", fix: nil, section: .project)
+        }
+        return DoctorCheck(
+            name: "Git Repository", status: .warning,
+            message: "Not a git repository",
+            fix: "Run: git init",
+            section: .project
+        )
+    }
+
+    func checkLassoAuth() -> DoctorCheck {
+        if ProcessInfo.processInfo.environment["LASSO_API_KEY"] != nil {
+            return DoctorCheck(
+                name: "Lasso Range Auth", status: .ok,
+                message: "Authenticated via LASSO_API_KEY", fix: nil, section: .cloud
+            )
+        }
+        if let credentials = AuthStore.live.load() {
+            let prefix = String(credentials.apiKey.prefix(8))
+            return DoctorCheck(
+                name: "Lasso Range Auth", status: .ok,
+                message: "Authenticated via ~/.lasso/auth.json (\(prefix)...)", fix: nil, section: .cloud
+            )
+        }
+        return DoctorCheck(
+            name: "Lasso Range Auth", status: .warning,
+            message: "Not authenticated — remote baselines unavailable",
+            fix: "Run: lasso auth login",
+            section: .cloud
+        )
+    }
+
+    func checkGitHubToken() -> DoctorCheck {
+        if ProcessInfo.processInfo.environment["GITHUB_TOKEN"] != nil {
+            return DoctorCheck(name: "GitHub Token", status: .ok, message: "GITHUB_TOKEN set", fix: nil, section: .cloud)
+        }
+        return DoctorCheck(
+            name: "GitHub Token", status: .warning,
+            message: "GITHUB_TOKEN not set",
+            fix: "Export GITHUB_TOKEN for PR comment posting",
+            section: .cloud
         )
     }
 }

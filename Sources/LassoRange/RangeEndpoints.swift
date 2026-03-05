@@ -85,4 +85,18 @@ enum RunEndpoints {
             method: .get
         )
     }
+
+    static func complete(project: String, runId: String) -> Endpoint<EmptyBody, RunResponse> {
+        Endpoint(
+            path: "runs/\(encodedSegment(project))/\(runId)",
+            method: .patch
+        )
+    }
+
+    static func appendLog(project: String, runId: String) -> Endpoint<EmptyBody, EmptyResponse> {
+        Endpoint(
+            path: "runs/\(encodedSegment(project))/\(runId)/logs",
+            method: .post
+        )
+    }
 }

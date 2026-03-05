@@ -86,6 +86,16 @@ let a11yCheckTool = Tool(
 
 let uiTools: [Tool] = [screenshotTool, tapTool, swipeTool, typeTool, a11yTreeTool, a11yCheckTool]
 
+// MARK: - Value Helpers
+
+extension Value {
+    var numericValue: Double? {
+        if let d = doubleValue { return d }
+        if let i = intValue { return Double(i) }
+        return nil
+    }
+}
+
 // MARK: - Handlers
 
 func handleScreenshot(config: LassoConfig?, driverPort: UInt16) async throws -> CallTool.Result {
@@ -103,7 +113,7 @@ func handleTap(arguments: [String: Value]?, config: LassoConfig?, driverPort: UI
     if let label = arguments?["label"]?.stringValue {
         try await ui.tap(label: label)
         return CallTool.Result(content: [.text("Tapped element: \"\(label)\"")])
-    } else if let x = arguments?["x"]?.doubleValue, let y = arguments?["y"]?.doubleValue {
+    } else if let x = arguments?["x"]?.numericValue, let y = arguments?["y"]?.numericValue {
         try await ui.tap(x: x, y: y)
         return CallTool.Result(content: [.text("Tapped at (\(x), \(y))")])
     } else {

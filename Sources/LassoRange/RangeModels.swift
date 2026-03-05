@@ -114,6 +114,18 @@ public struct RunUpload: Sendable {
     }
 }
 
+public struct StartRunRequest: Sendable {
+    public let branch: String
+    public let commitSHA: String?
+    public let trigger: String
+
+    public init(branch: String, commitSHA: String?, trigger: String) {
+        self.branch = branch
+        self.commitSHA = commitSHA
+        self.trigger = trigger
+    }
+}
+
 public struct RunResponse: Codable, Sendable {
     public let runId: String
     public let status: String

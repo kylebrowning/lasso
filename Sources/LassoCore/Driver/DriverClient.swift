@@ -186,7 +186,13 @@ private func driverGet(baseURL: String, path: String) async throws -> Data {
     guard let url = URL(string: "\(baseURL)\(path)") else {
         throw LassoError.invalidArgument("Invalid URL: \(baseURL)\(path)")
     }
-    let (data, response) = try await URLSession.shared.data(from: url)
+    let data: Data
+    let response: URLResponse
+    do {
+        (data, response) = try await URLSession.shared.data(from: url)
+    } catch let error as URLError where error.code == .cannotConnectToHost {
+        throw LassoError.driverNotRunning
+    }
     guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
         throw LassoError.commandFailed(
@@ -208,7 +214,13 @@ private func driverPost(baseURL: String, path: String, body: Data) async throws 
     request.setValue("application/json", forHTTPHeaderField: "Content-Type")
     request.httpBody = body
 
-    let (data, response) = try await URLSession.shared.data(for: request)
+    let data: Data
+    let response: URLResponse
+    do {
+        (data, response) = try await URLSession.shared.data(for: request)
+    } catch let error as URLError where error.code == .cannotConnectToHost {
+        throw LassoError.driverNotRunning
+    }
     guard let http = response as? HTTPURLResponse, (200..<300).contains(http.statusCode) else {
         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
         throw LassoError.commandFailed(

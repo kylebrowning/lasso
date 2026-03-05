@@ -17,6 +17,7 @@ public enum LassoError: Error, LocalizedError, Sendable {
     case networkError(String, Int)
     case baselineNotFound(String)
     case appNotFound(String)
+    case driverNotRunning
 
     public var errorDescription: String? {
         switch self {
@@ -52,6 +53,8 @@ public enum LassoError: Error, LocalizedError, Sendable {
             return "Baseline not found for screen \"\(screen)\""
         case .appNotFound(let path):
             return "App bundle not found at \"\(path)\". Verify the path exists or run a build first."
+        case .driverNotRunning:
+            return "Driver is not running. Start it first: lasso driver start"
         }
     }
 }

@@ -34,10 +34,18 @@ struct CICommand: AsyncParsableCommand {
         var driverCache: DriverCache = .live
         var imageDiffer: ImageDiffer = .live
 
-        /// Log a step to stderr so CI sees it immediately (stdout is buffered).
-        func log(_ message: String) {
+        /// Log a step to stderr and stream to the backend if a run is active.
+        func log(_ message: String, client: RangeClient? = nil, project: String? = nil, runId: String? = nil) {
             guard !options.json else { return }
-            FileHandle.standardError.write(Data("[lasso] \(message)\n".utf8))
+            let line = "[lasso] \(message)"
+            FileHandle.standardError.write(Data("\(line)\n".utf8))
+
+            // Fire-and-forget log append to backend
+            if let client, let project, let runId {
+                Task {
+                    try? await client.appendLog(project, runId, line)
+                }
+            }
         }
 
         func run() async throws {
@@ -70,248 +78,266 @@ struct CICommand: AsyncParsableCommand {
 
             // Get commit SHA (best effort)
             let commitSHA = try? await shell("git rev-parse HEAD")
+            let trimmedSHA = commitSHA?.trimmingCharacters(in: .whitespacesAndNewlines)
 
             // Determine trigger
             let trigger = ProcessInfo.processInfo.environment["CI"] != nil ? "ci" : "manual"
 
-            // 0. Preflight: ensure driver is available before expensive build
-            // Always need the driver on CI — simctl io screenshot fails on headless runners
-            let driverCacheValid = await driverCache.isValid()
-            log("Driver cache valid: \(driverCacheValid)")
-            if !driverCacheValid {
-                log("Preparing driver cache...")
-                try await driverCache.buildAndCache(resolved.simulator)
-                log("Driver cache ready")
+            // Start run immediately so it appears in the dashboard as "running"
+            let startResponse = try await client.startRun(project, StartRunRequest(
+                branch: branch, commitSHA: trimmedSHA, trigger: trigger
+            ))
+            let runId = startResponse.runId
+            log("Run started: \(runId)", client: client, project: project, runId: runId)
+
+            // Helper to log with streaming
+            func rlog(_ message: String) {
+                log(message, client: client, project: project, runId: runId)
             }
 
-            // 1. Boot → Build → Install → Launch → Capture
-            log("Booting simulator: \(resolved.simulator)")
-            let device = try await simulatorManager.boot(nameOrUDID: resolved.simulator)
-            log("Simulator booted: \(device.name) (\(device.udid))")
-            let destination = "platform=iOS Simulator,name=\(device.name)"
-
-            var productPath: String?
-
-            if let resolved_path = try await buildOptions.resolveProductPath(
-                scheme: resolved.scheme, workspace: resolved.workspace,
-                project: resolved.project, destination: destination
-            ) {
-                log("Skipping build — using \(resolved_path)")
-                productPath = resolved_path
-            } else {
-                log("Building \(resolved.scheme)...")
-
-                let buildResult = try await XcodeBuildRunner().build(
-                    scheme: resolved.scheme,
-                    workspace: resolved.workspace,
-                    project: resolved.project,
-                    destination: destination
-                )
-                log("Build finished: success=\(buildResult.success) duration=\(String(format: "%.1fs", buildResult.duration))")
-
-                guard buildResult.success else {
-                    if options.json {
-                        print(try JSONOutput.string(buildResult))
-                    } else {
-                        print(TableFormatter().formatBuild(buildResult))
-                    }
-                    throw ExitCode.failure
+            do {
+                // 0. Preflight: ensure driver is available before expensive build
+                let driverCacheValid = await driverCache.isValid()
+                rlog("Driver cache valid: \(driverCacheValid)")
+                if !driverCacheValid {
+                    rlog("Preparing driver cache...")
+                    try await driverCache.buildAndCache(resolved.simulator)
+                    rlog("Driver cache ready")
                 }
-                productPath = buildResult.productPath
-            }
 
-            if let bid = resolved.bundleId {
-                if let productPath {
-                    log("Installing \(bid)...")
-                    try await XcodeBuildRunner().install(
-                        bundleId: bid, productPath: productPath, udid: device.udid
+                // 1. Boot → Build → Install → Launch → Capture
+                rlog("Booting simulator: \(resolved.simulator)")
+                let device = try await simulatorManager.boot(nameOrUDID: resolved.simulator)
+                rlog("Simulator booted: \(device.name) (\(device.udid))")
+                let destination = "platform=iOS Simulator,name=\(device.name)"
+
+                var productPath: String?
+
+                if let resolved_path = try await buildOptions.resolveProductPath(
+                    scheme: resolved.scheme, workspace: resolved.workspace,
+                    project: resolved.project, destination: destination
+                ) {
+                    rlog("Skipping build — using \(resolved_path)")
+                    productPath = resolved_path
+                } else {
+                    rlog("Building \(resolved.scheme)...")
+
+                    let buildResult = try await XcodeBuildRunner().build(
+                        scheme: resolved.scheme,
+                        workspace: resolved.workspace,
+                        project: resolved.project,
+                        destination: destination
                     )
-                }
-                log("Launching \(bid)...")
-                try await XcodeBuildRunner().launch(bundleId: bid, udid: device.udid)
-                try await Task.sleep(for: .seconds(2))
-            }
+                    rlog("Build finished: success=\(buildResult.success) duration=\(String(format: "%.1fs", buildResult.duration))")
 
-            // Start driver (needed for screenshots on headless CI + navigation)
-            log("Starting driver on port \(options.driverPort)...")
-            let session = try await DriverSession.start(
-                udid: device.udid,
-                bundleId: resolved.bundleId,
-                simulatorName: device.name,
-                port: options.driverPort,
-                cache: driverCache
-            )
-            log("Driver healthy")
-
-            defer {
-                Task { await session.stop() }
-            }
-
-            log("Capturing \(resolved.screens.count) screen(s)...")
-
-            _ = try await session.captureAll(resolved.screens, captureDir)
-            log("Capture complete")
-
-            // 2. Compare against baselines
-            let diffConfig = config?.diff ?? .init()
-            let fm = FileManager.default
-            let store = client.asBaselineStore(project: project, branch: branch)
-            let differ = imageDiffer
-
-            if !fm.fileExists(atPath: diffDir) {
-                try fm.createDirectory(atPath: diffDir, withIntermediateDirectories: true)
-            }
-
-            guard fm.fileExists(atPath: captureDir) else {
-                throw LassoError.noCaptures(captureDir)
-            }
-            let captureFiles = try fm.contentsOfDirectory(atPath: captureDir)
-                .filter { $0.hasSuffix(".png") }
-                .sorted()
-
-            guard !captureFiles.isEmpty else {
-                throw LassoError.noCaptures(captureDir)
-            }
-
-            log("Comparing \(captureFiles.count) screen(s) against baselines...")
-
-            var screenUploads: [RunScreenUpload] = []
-            var allPassed = true
-
-            for file in captureFiles {
-                let screenName = String(file.dropLast(4))
-                let capturePath = "\(captureDir)/\(file)"
-                let captureData = try Data(contentsOf: URL(fileURLWithPath: capturePath))
-
-                let baselineData = try await store.load(screenName)
-
-                if let baselineData {
-                    do {
-                        let output = try differ.compare(baselineData, captureData)
-                        let pixelPass = output.pixelDiffPercent <= diffConfig.threshold
-                        let perceptualPass = output.perceptualDistance <= diffConfig.perceptualThreshold
-                        let passed = pixelPass && perceptualPass
-
-                        var diffData: Data? = nil
-                        if !passed {
-                            allPassed = false
-                            let path = "\(diffDir)/\(screenName)_diff.png"
-                            try output.diffImageData.write(to: URL(fileURLWithPath: path))
-                            diffData = output.diffImageData
+                    guard buildResult.success else {
+                        if options.json {
+                            print(try JSONOutput.string(buildResult))
+                        } else {
+                            print(TableFormatter().formatBuild(buildResult))
                         }
+                        throw ExitCode.failure
+                    }
+                    productPath = buildResult.productPath
+                }
 
-                        let message = passed
-                            ? "Passed"
-                            : "Failed: pixel=\(String(format: "%.2f%%", output.pixelDiffPercent * 100)) perceptual=\(String(format: "%.1f", output.perceptualDistance))"
+                if let bid = resolved.bundleId {
+                    if let productPath {
+                        rlog("Installing \(bid)...")
+                        try await XcodeBuildRunner().install(
+                            bundleId: bid, productPath: productPath, udid: device.udid
+                        )
+                    }
+                    rlog("Launching \(bid)...")
+                    try await XcodeBuildRunner().launch(bundleId: bid, udid: device.udid)
+                    try await Task.sleep(for: .seconds(2))
+                }
 
+                // Start driver (needed for screenshots on headless CI + navigation)
+                rlog("Starting driver on port \(options.driverPort)...")
+                let session = try await DriverSession.start(
+                    udid: device.udid,
+                    bundleId: resolved.bundleId,
+                    simulatorName: device.name,
+                    port: options.driverPort,
+                    cache: driverCache
+                )
+                rlog("Driver healthy")
+
+                defer {
+                    Task { await session.stop() }
+                }
+
+                rlog("Capturing \(resolved.screens.count) screen(s)...")
+
+                _ = try await session.captureAll(resolved.screens, captureDir)
+                rlog("Capture complete")
+
+                // 2. Compare against baselines
+                let diffConfig = config?.diff ?? .init()
+                let fm = FileManager.default
+                let store = client.asBaselineStore(project: project, branch: branch)
+                let differ = imageDiffer
+
+                if !fm.fileExists(atPath: diffDir) {
+                    try fm.createDirectory(atPath: diffDir, withIntermediateDirectories: true)
+                }
+
+                guard fm.fileExists(atPath: captureDir) else {
+                    throw LassoError.noCaptures(captureDir)
+                }
+                let captureFiles = try fm.contentsOfDirectory(atPath: captureDir)
+                    .filter { $0.hasSuffix(".png") }
+                    .sorted()
+
+                guard !captureFiles.isEmpty else {
+                    throw LassoError.noCaptures(captureDir)
+                }
+
+                rlog("Comparing \(captureFiles.count) screen(s) against baselines...")
+
+                var screenUploads: [RunScreenUpload] = []
+                var allPassed = true
+
+                for file in captureFiles {
+                    let screenName = String(file.dropLast(4))
+                    let capturePath = "\(captureDir)/\(file)"
+                    let captureData = try Data(contentsOf: URL(fileURLWithPath: capturePath))
+
+                    let baselineData = try await store.load(screenName)
+
+                    if let baselineData {
+                        do {
+                            let output = try differ.compare(baselineData, captureData)
+                            let pixelPass = output.pixelDiffPercent <= diffConfig.threshold
+                            let perceptualPass = output.perceptualDistance <= diffConfig.perceptualThreshold
+                            let passed = pixelPass && perceptualPass
+
+                            var diffData: Data? = nil
+                            if !passed {
+                                allPassed = false
+                                let path = "\(diffDir)/\(screenName)_diff.png"
+                                try output.diffImageData.write(to: URL(fileURLWithPath: path))
+                                diffData = output.diffImageData
+                            }
+
+                            let message = passed
+                                ? "Passed"
+                                : "Failed: pixel=\(String(format: "%.2f%%", output.pixelDiffPercent * 100)) perceptual=\(String(format: "%.1f", output.perceptualDistance))"
+
+                            screenUploads.append(RunScreenUpload(
+                                name: screenName,
+                                status: passed ? "passed" : "failed",
+                                pixelDiffPercent: output.pixelDiffPercent,
+                                perceptualDistance: output.perceptualDistance,
+                                pixelThreshold: diffConfig.threshold,
+                                perceptualThreshold: diffConfig.perceptualThreshold,
+                                message: message,
+                                captureData: captureData,
+                                diffData: diffData
+                            ))
+                        } catch {
+                            allPassed = false
+                            screenUploads.append(RunScreenUpload(
+                                name: screenName,
+                                status: "error",
+                                pixelThreshold: diffConfig.threshold,
+                                perceptualThreshold: diffConfig.perceptualThreshold,
+                                message: "Error: \(error.localizedDescription)",
+                                captureData: captureData
+                            ))
+                        }
+                    } else {
+                        // New screen — no baseline
                         screenUploads.append(RunScreenUpload(
                             name: screenName,
-                            status: passed ? "passed" : "failed",
-                            pixelDiffPercent: output.pixelDiffPercent,
-                            perceptualDistance: output.perceptualDistance,
+                            status: "new_screen",
                             pixelThreshold: diffConfig.threshold,
                             perceptualThreshold: diffConfig.perceptualThreshold,
-                            message: message,
-                            captureData: captureData,
-                            diffData: diffData
-                        ))
-                    } catch {
-                        allPassed = false
-                        screenUploads.append(RunScreenUpload(
-                            name: screenName,
-                            status: "error",
-                            pixelThreshold: diffConfig.threshold,
-                            perceptualThreshold: diffConfig.perceptualThreshold,
-                            message: "Error: \(error.localizedDescription)",
+                            message: "New screen — no baseline",
                             captureData: captureData
                         ))
                     }
+                }
+
+                // 3. Complete run with results
+                let duration = Date().timeIntervalSince(start)
+                let upload = RunUpload(
+                    branch: branch,
+                    commitSHA: trimmedSHA,
+                    trigger: trigger,
+                    duration: duration,
+                    screens: screenUploads
+                )
+
+                rlog("Uploading results to \(credentials.baseURL)...")
+
+                let runResponse = try await client.completeRun(project, runId, upload)
+                rlog("Upload complete: run=\(runResponse.runId)")
+
+                // 4. Output results
+                struct CIRunResult: Codable, Sendable {
+                    let runId: String
+                    let status: String
+                    let url: String
+                    let branch: String
+                    let commitSha: String?
+                    let trigger: String
+                    let screenCount: Int
+                    let passedCount: Int
+                    let failedCount: Int
+                    let newCount: Int
+                    let duration: Double
+
+                    enum CodingKeys: String, CodingKey {
+                        case runId = "run_id"
+                        case status, url, branch, trigger, duration
+                        case commitSha = "commit_sha"
+                        case screenCount = "screen_count"
+                        case passedCount = "passed_count"
+                        case failedCount = "failed_count"
+                        case newCount = "new_count"
+                    }
+                }
+
+                let result = CIRunResult(
+                    runId: runResponse.runId,
+                    status: runResponse.status,
+                    url: runResponse.url,
+                    branch: branch,
+                    commitSha: trimmedSHA,
+                    trigger: trigger,
+                    screenCount: runResponse.screenCount,
+                    passedCount: runResponse.passedCount,
+                    failedCount: runResponse.failedCount,
+                    newCount: runResponse.newCount,
+                    duration: duration
+                )
+
+                if options.json {
+                    print(try JSONOutput.string(result))
                 } else {
-                    // New screen — no baseline
-                    screenUploads.append(RunScreenUpload(
-                        name: screenName,
-                        status: "new_screen",
-                        pixelThreshold: diffConfig.threshold,
-                        perceptualThreshold: diffConfig.perceptualThreshold,
-                        message: "New screen — no baseline",
-                        captureData: captureData
-                    ))
+                    print("")
+                    print("  Run:      \(result.runId)")
+                    print("  Status:   \(result.status)")
+                    print("  Branch:   \(result.branch)")
+                    if let sha = result.commitSha {
+                        print("  Commit:   \(String(sha.prefix(8)))")
+                    }
+                    print("  Trigger:  \(result.trigger)")
+                    print("  Screens:  \(result.screenCount) total, \(result.passedCount) passed, \(result.failedCount) failed, \(result.newCount) new")
+                    print("  Duration: \(String(format: "%.1fs", result.duration))")
+                    print("  URL:      \(result.url)")
+                    print("")
                 }
-            }
 
-            // 3. Upload run results
-            let duration = Date().timeIntervalSince(start)
-            let upload = RunUpload(
-                branch: branch,
-                commitSHA: commitSHA?.trimmingCharacters(in: .whitespacesAndNewlines),
-                trigger: trigger,
-                duration: duration,
-                screens: screenUploads
-            )
-
-            log("Uploading results to \(credentials.baseURL)...")
-
-            let runResponse = try await client.createRun(project, upload)
-            log("Upload complete: run=\(runResponse.runId)")
-
-            // 4. Output results
-            struct CIRunResult: Codable, Sendable {
-                let runId: String
-                let status: String
-                let url: String
-                let branch: String
-                let commitSha: String?
-                let trigger: String
-                let screenCount: Int
-                let passedCount: Int
-                let failedCount: Int
-                let newCount: Int
-                let duration: Double
-
-                enum CodingKeys: String, CodingKey {
-                    case runId = "run_id"
-                    case status, url, branch, trigger, duration
-                    case commitSha = "commit_sha"
-                    case screenCount = "screen_count"
-                    case passedCount = "passed_count"
-                    case failedCount = "failed_count"
-                    case newCount = "new_count"
+                if !allPassed {
+                    throw ExitCode.failure
                 }
-            }
-
-            let result = CIRunResult(
-                runId: runResponse.runId,
-                status: runResponse.status,
-                url: runResponse.url,
-                branch: branch,
-                commitSha: commitSHA?.trimmingCharacters(in: .whitespacesAndNewlines),
-                trigger: trigger,
-                screenCount: runResponse.screenCount,
-                passedCount: runResponse.passedCount,
-                failedCount: runResponse.failedCount,
-                newCount: runResponse.newCount,
-                duration: duration
-            )
-
-            if options.json {
-                print(try JSONOutput.string(result))
-            } else {
-                print("")
-                print("  Run:      \(result.runId)")
-                print("  Status:   \(result.status)")
-                print("  Branch:   \(result.branch)")
-                if let sha = result.commitSha {
-                    print("  Commit:   \(String(sha.prefix(8)))")
-                }
-                print("  Trigger:  \(result.trigger)")
-                print("  Screens:  \(result.screenCount) total, \(result.passedCount) passed, \(result.failedCount) failed, \(result.newCount) new")
-                print("  Duration: \(String(format: "%.1fs", result.duration))")
-                print("  URL:      \(result.url)")
-                print("")
-            }
-
-            if !allPassed {
-                throw ExitCode.failure
+            } catch {
+                // If the run was started but failed, try to mark it as failed
+                try? await client.appendLog(project, runId, "[lasso] Run failed: \(error)")
+                throw error
             }
         }
     }

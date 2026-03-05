@@ -11,6 +11,12 @@ public struct RangeClient: Sendable {
     public var deleteBaseline: @Sendable (String, String, String) async throws -> Void
     public var promoteBaselines: @Sendable (String, String, String) async throws -> Void
     public var createRun: @Sendable (String, RunUpload) async throws -> RunResponse
+    /// Start a run with status "running" — returns run ID immediately.
+    public var startRun: @Sendable (String, StartRunRequest) async throws -> RunResponse
+    /// Complete a running run with screen results and images.
+    public var completeRun: @Sendable (String, String, RunUpload) async throws -> RunResponse
+    /// Append log lines to a running run.
+    public var appendLog: @Sendable (String, String, String) async throws -> Void
 
     public init(
         me: @escaping @Sendable () async throws -> MeResponse,
@@ -19,7 +25,10 @@ public struct RangeClient: Sendable {
         uploadBaseline: @escaping @Sendable (String, String, String, Data) async throws -> Void,
         deleteBaseline: @escaping @Sendable (String, String, String) async throws -> Void,
         promoteBaselines: @escaping @Sendable (String, String, String) async throws -> Void,
-        createRun: @escaping @Sendable (String, RunUpload) async throws -> RunResponse
+        createRun: @escaping @Sendable (String, RunUpload) async throws -> RunResponse,
+        startRun: @escaping @Sendable (String, StartRunRequest) async throws -> RunResponse,
+        completeRun: @escaping @Sendable (String, String, RunUpload) async throws -> RunResponse,
+        appendLog: @escaping @Sendable (String, String, String) async throws -> Void
     ) {
         self.me = me
         self.listBaselines = listBaselines
@@ -28,6 +37,9 @@ public struct RangeClient: Sendable {
         self.deleteBaseline = deleteBaseline
         self.promoteBaselines = promoteBaselines
         self.createRun = createRun
+        self.startRun = startRun
+        self.completeRun = completeRun
+        self.appendLog = appendLog
     }
 }
 
@@ -86,6 +98,41 @@ extension RangeClient {
                 request.httpBody = form.data
                 let data = try await client.sendRequest(request)
                 return try JSONDecoder().decode(RunResponse.self, from: data)
+            },
+            startRun: { project, startReq in
+                let endpoint = RunEndpoints.create(project: project)
+                let url = endpoint.url(relativeTo: baseURL)
+                var request = URLRequest(url: url)
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                let body = try JSONEncoder().encode([
+                    "branch": startReq.branch,
+                    "commit_sha": startReq.commitSHA ?? "",
+                    "trigger": startReq.trigger,
+                ])
+                request.httpBody = body
+                let data = try await client.sendRequest(request)
+                return try JSONDecoder().decode(RunResponse.self, from: data)
+            },
+            completeRun: { project, runId, upload in
+                let endpoint = RunEndpoints.complete(project: project, runId: runId)
+                let url = endpoint.url(relativeTo: baseURL)
+                let form = MultipartForm.build(from: upload)
+                var request = URLRequest(url: url)
+                request.httpMethod = "PATCH"
+                request.setValue(form.contentType, forHTTPHeaderField: "Content-Type")
+                request.httpBody = form.data
+                let data = try await client.sendRequest(request)
+                return try JSONDecoder().decode(RunResponse.self, from: data)
+            },
+            appendLog: { project, runId, lines in
+                let endpoint = RunEndpoints.appendLog(project: project, runId: runId)
+                let url = endpoint.url(relativeTo: baseURL)
+                var request = URLRequest(url: url)
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.httpBody = try JSONEncoder().encode(["lines": lines])
+                _ = try await client.sendRequest(request)
             }
         )
     }
@@ -204,6 +251,9 @@ extension RangeClient {
         uploadBaseline: { _, _, _, _ in throw LassoError.notAuthenticated },
         deleteBaseline: { _, _, _ in throw LassoError.notAuthenticated },
         promoteBaselines: { _, _, _ in throw LassoError.notAuthenticated },
-        createRun: { _, _ in throw LassoError.notAuthenticated }
+        createRun: { _, _ in throw LassoError.notAuthenticated },
+        startRun: { _, _ in throw LassoError.notAuthenticated },
+        completeRun: { _, _, _ in throw LassoError.notAuthenticated },
+        appendLog: { _, _, _ in throw LassoError.notAuthenticated }
     )
 }
