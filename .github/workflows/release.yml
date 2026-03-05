@@ -1,0 +1,28 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - '*'
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build universal binary
+        run: |
+          swift build -c release --arch arm64 --arch x86_64
+          BINARY=.build/apple/Products/Release/lasso
+          strip "$BINARY"
+          tar -czf "lasso-${{ github.ref_name }}-macos.tar.gz" -C "$(dirname "$BINARY")" lasso
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: lasso-${{ github.ref_name }}-macos.tar.gz
+          generate_release_notes: true
