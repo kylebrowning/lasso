@@ -1,11 +1,12 @@
 import ArgumentParser
+import LassoCore
 
 @available(macOS 15, *)
 public struct LassoCommand: AsyncParsableCommand {
     public static let configuration = CommandConfiguration(
         commandName: "lasso",
         abstract: "iOS development CLI — build, test, automate, and diff.",
-        version: "0.1.0",
+        version: lassoVersion,
         subcommands: [
             BuildCommand.self,
             RunCommand.self,

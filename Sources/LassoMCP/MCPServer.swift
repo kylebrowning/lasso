@@ -17,7 +17,7 @@ public struct MCPServer: Sendable {
 
         let server = Server(
             name: "lasso",
-            version: "0.1.0",
+            version: lassoVersion,
             capabilities: .init(tools: .init(listChanged: false))
         )
 
