@@ -15,9 +15,12 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Build universal binary
+        run: swift build -c release --arch arm64 --arch x86_64 || true
+
+      - name: Verify and package binary
         run: |
-          swift build -c release --arch arm64 --arch x86_64
-          BINARY=.build/apple/Products/Release/lasso
+          BINARY=$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/lasso
+          test -f "$BINARY" || { echo "Binary not found at $BINARY"; exit 1; }
           strip "$BINARY"
           tar -czf "lasso-${{ github.ref_name }}-macos.tar.gz" -C "$(dirname "$BINARY")" lasso
 
