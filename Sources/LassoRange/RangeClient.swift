@@ -79,11 +79,11 @@ extension RangeClient {
             createRun: { project, upload in
                 let endpoint = RunEndpoints.create(project: project)
                 let url = endpoint.url(relativeTo: baseURL)
-                let multipart = MultipartBody.build(from: upload)
+                let form = MultipartForm.build(from: upload)
                 var request = URLRequest(url: url)
                 request.httpMethod = "POST"
-                request.setValue(multipart.contentType, forHTTPHeaderField: "Content-Type")
-                request.httpBody = multipart.data
+                request.setValue(form.contentType, forHTTPHeaderField: "Content-Type")
+                request.httpBody = form.data
                 let data = try await client.sendRequest(request)
                 return try JSONDecoder().decode(RunResponse.self, from: data)
             }
@@ -91,102 +91,81 @@ extension RangeClient {
     }
 }
 
-// MARK: - Multipart Body Builder
+// MARK: - Multipart Form Builder
 
-private struct MultipartBody {
+/// Builds a standard multipart/form-data body matching Vapor's Content decoding expectations.
+/// Form fields use `name="key"`, indexed arrays use `name="key[0]"`, files use `filename="name.png"`.
+private struct MultipartForm {
     let data: Data
     let boundary: String
     var contentType: String { "multipart/form-data; boundary=\(boundary)" }
 
-    static func build(from upload: RunUpload) -> MultipartBody {
+    static func build(from upload: RunUpload) -> MultipartForm {
         let boundary = "Boundary-\(UUID().uuidString)"
         var body = Data()
 
-        // Metadata part
-        let metadata = RunMetadataDTO(
-            branch: upload.branch,
-            commitSha: upload.commitSHA,
-            trigger: upload.trigger,
-            duration: upload.duration,
-            screens: upload.screens.map { s in
-                RunMetadataDTO.ScreenDTO(
-                    name: s.name,
-                    status: s.status,
-                    pixelDiffPercent: s.pixelDiffPercent,
-                    perceptualDistance: s.perceptualDistance,
-                    pixelThreshold: s.pixelThreshold,
-                    perceptualThreshold: s.perceptualThreshold,
-                    message: s.message
-                )
+        // Top-level form fields
+        body.appendField(boundary: boundary, name: "branch", value: upload.branch)
+        if let sha = upload.commitSHA {
+            body.appendField(boundary: boundary, name: "commit_sha", value: sha)
+        }
+        body.appendField(boundary: boundary, name: "trigger", value: upload.trigger)
+        if let duration = upload.duration {
+            body.appendField(boundary: boundary, name: "duration", value: String(duration))
+        }
+
+        // Screens as indexed array of fields: screens[0][name], screens[0][status], etc.
+        for (i, screen) in upload.screens.enumerated() {
+            body.appendField(boundary: boundary, name: "screens[\(i)][name]", value: screen.name)
+            body.appendField(boundary: boundary, name: "screens[\(i)][status]", value: screen.status)
+            body.appendField(boundary: boundary, name: "screens[\(i)][pixel_threshold]", value: String(screen.pixelThreshold))
+            body.appendField(boundary: boundary, name: "screens[\(i)][perceptual_threshold]", value: String(screen.perceptualThreshold))
+            if let v = screen.pixelDiffPercent {
+                body.appendField(boundary: boundary, name: "screens[\(i)][pixel_diff_percent]", value: String(v))
             }
-        )
+            if let v = screen.perceptualDistance {
+                body.appendField(boundary: boundary, name: "screens[\(i)][perceptual_distance]", value: String(v))
+            }
+            if let v = screen.message {
+                body.appendField(boundary: boundary, name: "screens[\(i)][message]", value: v)
+            }
+        }
 
-        let metadataJSON = try! JSONEncoder().encode(metadata)
-        body.appendMultipart(boundary: boundary, name: "metadata", contentType: "application/json", data: metadataJSON)
-
-        // Capture + diff image parts
+        // Capture files as indexed array: captures[0], captures[1], ...
+        var captureIndex = 0
         for screen in upload.screens {
             if let captureData = screen.captureData {
-                body.appendMultipart(
-                    boundary: boundary, name: "capture_\(screen.name)",
-                    filename: "\(screen.name).png", contentType: "image/png", data: captureData
-                )
+                body.appendFile(boundary: boundary, name: "captures[\(captureIndex)]", filename: "\(screen.name).png", data: captureData)
+                captureIndex += 1
             }
+        }
+
+        // Diff files as indexed array: diffs[0], diffs[1], ...
+        var diffIndex = 0
+        for screen in upload.screens {
             if let diffData = screen.diffData {
-                body.appendMultipart(
-                    boundary: boundary, name: "diff_\(screen.name)",
-                    filename: "\(screen.name)_diff.png", contentType: "image/png", data: diffData
-                )
+                body.appendFile(boundary: boundary, name: "diffs[\(diffIndex)]", filename: "\(screen.name)_diff.png", data: diffData)
+                diffIndex += 1
             }
         }
 
         body.append("--\(boundary)--\r\n".data(using: .utf8)!)
-        return MultipartBody(data: body, boundary: boundary)
-    }
-}
-
-/// Internal DTO for multipart metadata — maps to backend's expected JSON shape.
-private struct RunMetadataDTO: Encodable {
-    let branch: String
-    let commitSha: String?
-    let trigger: String
-    let duration: Double?
-    let screens: [ScreenDTO]
-
-    enum CodingKeys: String, CodingKey {
-        case branch
-        case commitSha = "commit_sha"
-        case trigger, duration, screens
-    }
-
-    struct ScreenDTO: Encodable {
-        let name: String
-        let status: String
-        let pixelDiffPercent: Double?
-        let perceptualDistance: Double?
-        let pixelThreshold: Double
-        let perceptualThreshold: Double
-        let message: String?
-
-        enum CodingKeys: String, CodingKey {
-            case name, status, message
-            case pixelDiffPercent = "pixel_diff_percent"
-            case perceptualDistance = "perceptual_distance"
-            case pixelThreshold = "pixel_threshold"
-            case perceptualThreshold = "perceptual_threshold"
-        }
+        return MultipartForm(data: body, boundary: boundary)
     }
 }
 
 private extension Data {
-    mutating func appendMultipart(boundary: String, name: String, filename: String? = nil, contentType: String, data: Data) {
+    mutating func appendField(boundary: String, name: String, value: String) {
         append("--\(boundary)\r\n".data(using: .utf8)!)
-        if let filename {
-            append("Content-Disposition: form-data; name=\"\(name)\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)
-        } else {
-            append("Content-Disposition: form-data; name=\"\(name)\"\r\n".data(using: .utf8)!)
-        }
-        append("Content-Type: \(contentType)\r\n\r\n".data(using: .utf8)!)
+        append("Content-Disposition: form-data; name=\"\(name)\"\r\n\r\n".data(using: .utf8)!)
+        append(value.data(using: .utf8)!)
+        append("\r\n".data(using: .utf8)!)
+    }
+
+    mutating func appendFile(boundary: String, name: String, filename: String, data: Data) {
+        append("--\(boundary)\r\n".data(using: .utf8)!)
+        append("Content-Disposition: form-data; name=\"\(name)\"; filename=\"\(filename)\"\r\n".data(using: .utf8)!)
+        append("Content-Type: image/png\r\n\r\n".data(using: .utf8)!)
         append(data)
         append("\r\n".data(using: .utf8)!)
     }
