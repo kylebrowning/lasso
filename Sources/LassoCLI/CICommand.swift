@@ -19,6 +19,7 @@ struct CICommand: AsyncParsableCommand {
         )
 
         @OptionGroup var options: GlobalOptions
+        @OptionGroup var buildOptions: BuildOptions
 
         @Option(name: .long, help: "Scheme to build")
         var scheme: String?
@@ -64,28 +65,41 @@ struct CICommand: AsyncParsableCommand {
             let device = try await SimulatorManager().boot(nameOrUDID: resolved.simulator)
             let destination = "platform=iOS Simulator,name=\(device.name)"
 
-            if !options.json {
-                print("Building \(resolved.scheme)...")
-            }
+            var productPath: String?
 
-            let buildResult = try await XcodeBuildRunner().build(
-                scheme: resolved.scheme,
-                workspace: resolved.workspace,
-                project: resolved.project,
-                destination: destination
-            )
-
-            guard buildResult.success else {
-                if options.json {
-                    print(try JSONOutput.string(buildResult))
-                } else {
-                    print(TableFormatter().formatBuild(buildResult))
+            if let resolved_path = try await buildOptions.resolveProductPath(
+                scheme: resolved.scheme, workspace: resolved.workspace,
+                project: resolved.project, destination: destination
+            ) {
+                if !options.json {
+                    print("Skipping build — using \(resolved_path)")
                 }
-                throw ExitCode.failure
+                productPath = resolved_path
+            } else {
+                if !options.json {
+                    print("Building \(resolved.scheme)...")
+                }
+
+                let buildResult = try await XcodeBuildRunner().build(
+                    scheme: resolved.scheme,
+                    workspace: resolved.workspace,
+                    project: resolved.project,
+                    destination: destination
+                )
+
+                guard buildResult.success else {
+                    if options.json {
+                        print(try JSONOutput.string(buildResult))
+                    } else {
+                        print(TableFormatter().formatBuild(buildResult))
+                    }
+                    throw ExitCode.failure
+                }
+                productPath = buildResult.productPath
             }
 
             if let bid = resolved.bundleId {
-                if let productPath = buildResult.productPath {
+                if let productPath {
                     try await XcodeBuildRunner().install(
                         bundleId: bid, productPath: productPath, udid: device.udid
                     )

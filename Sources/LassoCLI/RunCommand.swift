@@ -8,6 +8,7 @@ struct RunCommand: AsyncParsableCommand {
     )
 
     @OptionGroup var options: GlobalOptions
+    @OptionGroup var buildOptions: BuildOptions
 
     @Option(name: .long, help: "Scheme to build")
     var scheme: String?
@@ -25,25 +26,37 @@ struct RunCommand: AsyncParsableCommand {
 
         // Boot simulator if needed
         let device = try await SimulatorManager().boot(nameOrUDID: sim)
-
-        // Build
         let destination = "platform=iOS Simulator,name=\(device.name)"
-        let buildResult = try await XcodeBuildRunner().build(
-            scheme: schemeName, workspace: config?.workspace, project: config?.project, destination: destination
-        )
 
-        if !buildResult.success {
-            if options.json {
-                print(try JSONOutput.string(buildResult))
-            } else {
-                print(TableFormatter().formatBuild(buildResult))
+        var productPath: String?
+
+        if let resolvedPath = try await buildOptions.resolveProductPath(
+            scheme: schemeName, workspace: config?.workspace,
+            project: config?.project, destination: destination
+        ) {
+            if !options.json {
+                print("Skipping build — using \(resolvedPath)")
             }
-            throw ExitCode.failure
+            productPath = resolvedPath
+        } else {
+            let buildResult = try await XcodeBuildRunner().build(
+                scheme: schemeName, workspace: config?.workspace, project: config?.project, destination: destination
+            )
+
+            if !buildResult.success {
+                if options.json {
+                    print(try JSONOutput.string(buildResult))
+                } else {
+                    print(TableFormatter().formatBuild(buildResult))
+                }
+                throw ExitCode.failure
+            }
+            productPath = buildResult.productPath
         }
 
         // Install and launch
         if let bundleId = config?.bundleId {
-            if let productPath = buildResult.productPath {
+            if let productPath {
                 try await XcodeBuildRunner().install(bundleId: bundleId, productPath: productPath, udid: device.udid)
             }
             try await XcodeBuildRunner().launch(bundleId: bundleId, udid: device.udid)

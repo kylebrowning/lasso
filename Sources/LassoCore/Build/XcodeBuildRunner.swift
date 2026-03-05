@@ -101,7 +101,7 @@ public struct XcodeBuildRunner: Sendable {
         }
     }
 
-    private func resolveProductPath(
+    public func resolveProductPath(
         scheme: String, workspace: String?, project: String?, destination: String
     ) async throws -> String {
         var args = ["xcodebuild", "-scheme", scheme]

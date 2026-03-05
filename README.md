@@ -52,6 +52,8 @@ lasso diff approve
 ```
 lasso build              Build the Xcode project
 lasso run                Build + install + launch on simulator
+  --skip-build           Use existing build artifacts from DerivedData
+  --app-path <path>      Use a pre-built .app bundle (implies --skip-build)
 lasso test               Run tests with structured output
 lasso sim list           List available simulators
 lasso sim boot           Boot a simulator by name or UDID
@@ -75,6 +77,8 @@ lasso auth status        Show current authentication
 lasso auth logout        Remove stored credentials
 
 lasso ci run             Run full CI pipeline (build → capture → diff → upload)
+  --skip-build           Use existing build artifacts from DerivedData
+  --app-path <path>      Use a pre-built .app bundle (implies --skip-build)
 
 lasso mcp                Start MCP stdio server for AI agents
 lasso driver build       Build and cache the XCUITest driver
@@ -125,13 +129,26 @@ jobs:
     steps:
       - uses: actions/checkout@v4
       - name: Install Lasso
-        run: |
-          brew install mint
-          mint install kylebrowning/lasso
+        run: brew install kylebrowning/lasso/lasso
       - name: Run visual diff
         env:
           LASSO_API_KEY: ${{ secrets.LASSO_API_KEY }}
         run: lasso ci run
+```
+
+If your app is already built by a previous CI step, skip the build:
+
+```yaml
+      - name: Run visual diff (skip build)
+        env:
+          LASSO_API_KEY: ${{ secrets.LASSO_API_KEY }}
+        run: lasso ci run --skip-build
+
+      # Or point to a specific .app from another job's artifacts
+      - name: Run visual diff (pre-built app)
+        env:
+          LASSO_API_KEY: ${{ secrets.LASSO_API_KEY }}
+        run: lasso ci run --app-path ./build/MyApp.app
 ```
 
 Results upload to the Lasso Range dashboard and post as GitHub Check Runs on your PRs.

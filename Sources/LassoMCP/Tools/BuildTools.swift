@@ -48,6 +48,14 @@ let runTool = Tool(
                 "type": .string("string"),
                 "description": .string("App bundle identifier. Defaults to lasso.yml bundle_id."),
             ]),
+            "skip_build": .object([
+                "type": .string("boolean"),
+                "description": .string("Skip building — use existing build artifacts from DerivedData."),
+            ]),
+            "app_path": .object([
+                "type": .string("string"),
+                "description": .string("Path to a pre-built .app bundle. Implies skip_build."),
+            ]),
         ]),
     ])
 )
@@ -114,27 +122,54 @@ func handleRun(arguments: [String: Value]?, config: LassoConfig?) async throws -
     let workspace = config?.workspace
     let project = config?.project
     let destination = "platform=iOS Simulator,name=\(simName)"
+    let skipBuild = arguments?["skip_build"]?.boolValue ?? false
+    let appPath = arguments?["app_path"]?.stringValue
 
     let runner = XcodeBuildRunner()
+    var productPath: String?
+    var buildDuration: TimeInterval = 0
 
-    // Build
-    let buildResult = try await runner.build(
-        scheme: scheme, workspace: workspace, project: project, destination: destination
-    )
-    guard buildResult.success, let productPath = buildResult.productPath else {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted]
-        let data = try encoder.encode(buildResult)
-        let json = String(data: data, encoding: .utf8) ?? "{}"
-        return CallTool.Result(content: [.text("Build failed:\n\(json)")], isError: true)
+    if let appPath {
+        let abs = (appPath as NSString).standardizingPath
+        guard FileManager.default.fileExists(atPath: abs) else {
+            return CallTool.Result(content: [.text("Error: App not found at \"\(abs)\"")], isError: true)
+        }
+        productPath = abs
+    } else if skipBuild {
+        let path = try await runner.resolveProductPath(
+            scheme: scheme, workspace: workspace, project: project, destination: destination
+        )
+        guard FileManager.default.fileExists(atPath: path) else {
+            return CallTool.Result(content: [.text("Error: Build artifacts not found at \"\(path)\". Run a build first.")], isError: true)
+        }
+        productPath = path
+    } else {
+        // Build
+        let buildResult = try await runner.build(
+            scheme: scheme, workspace: workspace, project: project, destination: destination
+        )
+        guard buildResult.success, let builtPath = buildResult.productPath else {
+            let encoder = JSONEncoder()
+            encoder.outputFormatting = [.prettyPrinted]
+            let data = try encoder.encode(buildResult)
+            let json = String(data: data, encoding: .utf8) ?? "{}"
+            return CallTool.Result(content: [.text("Build failed:\n\(json)")], isError: true)
+        }
+        productPath = builtPath
+        buildDuration = buildResult.duration
     }
 
     // Install + Launch
     let udid = try await SimulatorManager().bootedUDID()
-    try await runner.install(bundleId: bundleId, productPath: productPath, udid: udid)
+    if let productPath {
+        try await runner.install(bundleId: bundleId, productPath: productPath, udid: udid)
+    }
     try await runner.launch(bundleId: bundleId, udid: udid)
 
-    return CallTool.Result(content: [.text("App launched: \(bundleId) on \(simName) (build: \(String(format: "%.1f", buildResult.duration))s)")])
+    let msg = skipBuild || appPath != nil
+        ? "App launched: \(bundleId) on \(simName) (build skipped)"
+        : "App launched: \(bundleId) on \(simName) (build: \(String(format: "%.1f", buildDuration))s)"
+    return CallTool.Result(content: [.text(msg)])
 }
 
 func handleTest(arguments: [String: Value]?, config: LassoConfig?) async throws -> CallTool.Result {
