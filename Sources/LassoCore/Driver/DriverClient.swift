@@ -61,6 +61,49 @@ public struct DriverNode: Codable, Sendable, Equatable {
         self.children = children
     }
 
+    // MARK: - Pruning
+
+    /// Returns a simplified tree keeping only nodes that are interactive,
+    /// have a label/value/identifier, or are ancestors of such nodes.
+    /// Container-only nodes (Other, Group, etc.) with no meaningful info are collapsed.
+    public func pruned() -> DriverNode? {
+        let interactiveRoles: Set<String> = [
+            "Button", "Link", "Switch", "TextField", "SecureTextField",
+            "Slider", "CheckBox", "PopUpButton", "Tab", "MenuItem",
+            "SearchField", "TextArea", "Stepper", "Picker", "Toggle",
+            "AXButton", "AXLink", "AXSwitch", "AXTextField",
+            "AXSlider", "AXCheckBox", "AXPopUpButton",
+        ]
+
+        let isInteractive = interactiveRoles.contains(role)
+        let hasInfo = (label != nil && !label!.isEmpty)
+            || (value != nil && !value!.isEmpty)
+            || (identifier != nil && !identifier!.isEmpty)
+
+        let prunedChildren = children.compactMap { $0.pruned() }
+
+        if isInteractive || hasInfo {
+            return DriverNode(
+                role: role, label: label, value: value, identifier: identifier,
+                frame: frame, enabled: enabled, children: prunedChildren
+            )
+        }
+
+        // Container with meaningful children — keep it
+        if !prunedChildren.isEmpty {
+            // If this container has only one child, skip this level
+            if prunedChildren.count == 1 {
+                return prunedChildren[0]
+            }
+            return DriverNode(
+                role: role, label: nil, value: nil, identifier: nil,
+                frame: frame, enabled: enabled, children: prunedChildren
+            )
+        }
+
+        return nil
+    }
+
     // MARK: - Search
 
     public func find(label searchLabel: String) -> DriverNode? {

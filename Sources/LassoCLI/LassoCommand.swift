@@ -22,6 +22,7 @@ public struct LassoCommand: AsyncParsableCommand {
             AuthCommand.self,
             CICommand.self,
             LogCommand.self,
+            ScriptCommand.self,
         ]
     )
 

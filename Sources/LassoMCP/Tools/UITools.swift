@@ -145,7 +145,8 @@ func handleType(arguments: [String: Value]?, config: LassoConfig?, driverPort: U
 func handleA11yTree(config: LassoConfig?, driverPort: UInt16) async throws -> CallTool.Result {
     let udid = try await SimulatorManager.live.bootedUDID()
     let ui = UIAutomation(udid: udid, driverClient: .live(port: driverPort))
-    let tree = try await ui.hierarchy()
+    let rawTree = try await ui.hierarchy()
+    let tree = rawTree.pruned() ?? rawTree
     let encoder = JSONEncoder()
     encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
     let data = try encoder.encode(tree)

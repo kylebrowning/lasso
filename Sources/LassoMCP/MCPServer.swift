@@ -13,7 +13,7 @@ public struct MCPServer: Sendable {
         let config = try? LassoConfig.load()
         let driverPort = self.driverPort
 
-        let allTools = uiTools + buildTools + simTools + logTools + [contextTool]
+        let allTools = uiTools + buildTools + simTools + logTools + scriptTools + [contextTool]
 
         let server = Server(
             name: "lasso",
@@ -55,6 +55,10 @@ public struct MCPServer: Sendable {
                     return try await handleSimList()
                 case "lasso_sim_boot":
                     return try await handleSimBoot(arguments: params.arguments)
+
+                // Script
+                case "lasso_script":
+                    return try await handleScript(arguments: params.arguments, driverPort: driverPort)
 
                 // Logs
                 case "lasso_logs":

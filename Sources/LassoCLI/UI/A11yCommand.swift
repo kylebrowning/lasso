@@ -11,6 +11,9 @@ struct A11yCommand: AsyncParsableCommand {
     @Flag(name: .long, help: "Only show violations")
     var check = false
 
+    @Flag(name: .long, help: "Show the full unfiltered tree (default is pruned)")
+    var full = false
+
     @OptionGroup var options: GlobalOptions
 
     var simulatorManager: SimulatorManager = .live
@@ -32,7 +35,8 @@ struct A11yCommand: AsyncParsableCommand {
                 }
             }
         } else {
-            let tree = try await ui.hierarchy()
+            let rawTree = try await ui.hierarchy()
+            let tree = full ? rawTree : (rawTree.pruned() ?? rawTree)
             if options.json {
                 print(try JSONOutput.string(tree))
             } else {
