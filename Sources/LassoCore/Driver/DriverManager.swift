@@ -90,37 +90,51 @@ extension DriverManager {
                     "-only-testing", "LassoDriverUITests/DriverTest/testStartDriver",
                 ]
 
-                // Discard output to avoid pipe buffer deadlock on long-running process
+                // Capture stderr to a temp file for diagnostics if the driver fails to start
                 process.standardOutput = FileHandle.nullDevice
-                process.standardError = FileHandle.nullDevice
+                let stderrPath = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("lasso_driver_stderr_\(ProcessInfo.processInfo.processIdentifier).log")
+                FileManager.default.createFile(atPath: stderrPath.path, contents: nil)
+                let stderrHandle = FileHandle(forWritingAtPath: stderrPath.path)
+                process.standardError = stderrHandle ?? FileHandle.nullDevice
 
                 try process.run()
                 await state.setProcess(process)
 
                 // Wait for the driver to become healthy
                 let client = DriverClient.live(port: config.port)
-                let maxAttempts = 60
+                let maxAttempts = 90
                 let retryDelay: UInt64 = 1_000_000_000 // 1 second
 
                 for attempt in 1...maxAttempts {
                     // Check that the xcodebuild process is still alive
                     guard process.isRunning else {
+                        stderrHandle?.closeFile()
+                        let stderrOutput = (try? String(contentsOf: stderrPath, encoding: .utf8))
+                            .map { $0.suffix(2000) }.map(String.init) ?? ""
+                        try? FileManager.default.removeItem(at: stderrPath)
                         await state.clearProcess()
                         throw LassoError.commandFailed(
-                            "xcodebuild test process exited before driver became healthy",
+                            "xcodebuild test process exited (status \(process.terminationStatus)) before driver became healthy. stderr:\n\(stderrOutput)",
                             process.terminationStatus
                         )
                     }
 
                     do {
                         _ = try await client.health()
+                        stderrHandle?.closeFile()
+                        try? FileManager.default.removeItem(at: stderrPath)
                         return // Driver is ready
                     } catch {
                         if attempt == maxAttempts {
+                            stderrHandle?.closeFile()
+                            let stderrOutput = (try? String(contentsOf: stderrPath, encoding: .utf8))
+                                .map { $0.suffix(2000) }.map(String.init) ?? ""
+                            try? FileManager.default.removeItem(at: stderrPath)
                             process.terminate()
                             await state.clearProcess()
                             throw LassoError.commandFailed(
-                                "Driver did not become healthy after \(maxAttempts) seconds",
+                                "Driver did not become healthy after \(maxAttempts) seconds. stderr:\n\(stderrOutput)",
                                 1
                             )
                         }
