@@ -15,11 +15,31 @@ public struct ProjectIdentifier: Sendable, Codable {
 extension ProjectIdentifier {
     public static func resolve() async throws -> ProjectIdentifier {
         let remoteURL = try await shell("git remote get-url origin")
-        let branch = try await shell("git rev-parse --abbrev-ref HEAD")
+        let branch: String
+        if let ciBranch = resolveBranch() {
+            branch = ciBranch
+        } else {
+            branch = try await shell("git rev-parse --abbrev-ref HEAD")
+        }
         return ProjectIdentifier(
             projectSlug: parseSlug(from: remoteURL),
             currentBranch: branch
         )
+    }
+
+    /// Resolves the branch name from CI environment variables.
+    /// GitHub Actions checks out in detached HEAD, so git rev-parse returns "HEAD".
+    static func resolveBranch() -> String? {
+        let env = ProcessInfo.processInfo.environment
+        // PR branch (GitHub Actions)
+        if let head = env["GITHUB_HEAD_REF"], !head.isEmpty {
+            return head
+        }
+        // Push branch (GitHub Actions)
+        if let ref = env["GITHUB_REF_NAME"], !ref.isEmpty {
+            return ref
+        }
+        return nil
     }
 
     /// Parses "owner/repo" from a git remote URL.
