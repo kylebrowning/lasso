@@ -58,6 +58,20 @@ public struct BaselineListResponse: Codable, Sendable {
 
 // MARK: - Runs
 
+public struct RunStepUpload: Sendable, Codable {
+    public let action: String
+    public let status: String
+    public let duration: Double
+    public let message: String?
+
+    public init(action: String, status: String, duration: Double, message: String? = nil) {
+        self.action = action
+        self.status = status
+        self.duration = duration
+        self.message = message
+    }
+}
+
 public struct RunScreenUpload: Sendable {
     public let name: String
     public let status: String
@@ -68,6 +82,7 @@ public struct RunScreenUpload: Sendable {
     public let message: String?
     public let captureData: Data?
     public let diffData: Data?
+    public let steps: [RunStepUpload]
 
     public init(
         name: String,
@@ -78,7 +93,8 @@ public struct RunScreenUpload: Sendable {
         perceptualThreshold: Double,
         message: String? = nil,
         captureData: Data? = nil,
-        diffData: Data? = nil
+        diffData: Data? = nil,
+        steps: [RunStepUpload] = []
     ) {
         self.name = name
         self.status = status
@@ -89,6 +105,7 @@ public struct RunScreenUpload: Sendable {
         self.message = message
         self.captureData = captureData
         self.diffData = diffData
+        self.steps = steps
     }
 }
 

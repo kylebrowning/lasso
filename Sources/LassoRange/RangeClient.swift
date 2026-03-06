@@ -176,6 +176,12 @@ private struct MultipartForm {
             if let v = screen.message {
                 body.appendField(boundary: boundary, name: "screens[\(i)][message]", value: v)
             }
+            // Steps as JSON string
+            if !screen.steps.isEmpty,
+               let stepsJSON = try? JSONEncoder().encode(screen.steps),
+               let stepsStr = String(data: stepsJSON, encoding: .utf8) {
+                body.appendField(boundary: boundary, name: "screens[\(i)][steps]", value: stepsStr)
+            }
         }
 
         // Capture files as indexed array: captures[0], captures[1], ...

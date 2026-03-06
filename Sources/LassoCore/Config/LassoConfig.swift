@@ -20,10 +20,19 @@ public struct LassoConfig: Sendable, Codable {
         public struct Step: Sendable, Codable {
             public var tap: String?
             public var swipe: String?
+            public var type: String?
+            public var assertVisible: String?
 
-            public init(tap: String? = nil, swipe: String? = nil) {
+            public init(tap: String? = nil, swipe: String? = nil, type: String? = nil, assertVisible: String? = nil) {
                 self.tap = tap
                 self.swipe = swipe
+                self.type = type
+                self.assertVisible = assertVisible
+            }
+
+            enum CodingKeys: String, CodingKey {
+                case tap, swipe, type
+                case assertVisible = "assert_visible"
             }
         }
 

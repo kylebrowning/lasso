@@ -110,6 +110,21 @@ struct DiffCommand: AsyncParsableCommand {
 
             let captures = try await session.captureAll(resolved.screens, outputDir)
 
+            // Print step-by-step results
+            if !options.json {
+                for capture in captures {
+                    print("\n  \(capture.screenName)")
+                    for step in capture.steps {
+                        let icon = step.status == .passed ? "\u{2713}" : "\u{2717}"
+                        print("    \(icon) \(step.action)")
+                        if let msg = step.message {
+                            print("      \(msg)")
+                        }
+                    }
+                }
+                print("")
+            }
+
             let result = CaptureResult(
                 screens: captures,
                 directory: outputDir,
@@ -218,7 +233,22 @@ struct DiffCommand: AsyncParsableCommand {
                     print("Capturing \(resolved.screens.count) screen(s)...")
                 }
 
-                _ = try await session.captureAll(resolved.screens, captureDir)
+                let captures = try await session.captureAll(resolved.screens, captureDir)
+
+                // Print step-by-step results
+                if !options.json {
+                    for capture in captures {
+                        print("\n  \(capture.screenName)")
+                        for step in capture.steps {
+                            let icon = step.status == .passed ? "\u{2713}" : "\u{2717}"
+                            print("    \(icon) \(step.action)")
+                            if let msg = step.message {
+                                print("      \(msg)")
+                            }
+                        }
+                    }
+                    print("")
+                }
             }
 
             let diffConfig = config?.diff ?? .init()

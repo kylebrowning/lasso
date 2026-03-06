@@ -170,8 +170,37 @@ struct CICommand: AsyncParsableCommand {
 
                 rlog("Capturing \(resolved.screens.count) screen(s)...")
 
-                _ = try await session.captureAll(resolved.screens, captureDir)
+                let screenCaptures = try await session.captureAll(resolved.screens, captureDir)
                 rlog("Capture complete")
+
+                // Print step-by-step results (Maestro-style)
+                if !options.json {
+                    for capture in screenCaptures {
+                        FileHandle.standardError.write(Data("\n  \(capture.screenName)\n".utf8))
+                        for step in capture.steps {
+                            let icon = step.status == .passed ? "\u{2713}" : "\u{2717}"
+                            let line = "    \(icon) \(step.action)"
+                            FileHandle.standardError.write(Data("\(line)\n".utf8))
+                            if let msg = step.message {
+                                FileHandle.standardError.write(Data("      \(msg)\n".utf8))
+                            }
+                        }
+                    }
+                    FileHandle.standardError.write(Data("\n".utf8))
+                }
+
+                // Build step uploads lookup by screen name
+                var stepsByScreen: [String: [RunStepUpload]] = [:]
+                for capture in screenCaptures {
+                    stepsByScreen[capture.screenName] = capture.steps.map { step in
+                        RunStepUpload(
+                            action: step.action,
+                            status: step.status.rawValue,
+                            duration: step.duration,
+                            message: step.message
+                        )
+                    }
+                }
 
                 // 2. Compare against baselines
                 let diffConfig = config?.diff ?? .init()
@@ -234,7 +263,8 @@ struct CICommand: AsyncParsableCommand {
                                 perceptualThreshold: diffConfig.perceptualThreshold,
                                 message: message,
                                 captureData: captureData,
-                                diffData: diffData
+                                diffData: diffData,
+                                steps: stepsByScreen[screenName] ?? []
                             ))
                         } catch {
                             allPassed = false
@@ -244,7 +274,8 @@ struct CICommand: AsyncParsableCommand {
                                 pixelThreshold: diffConfig.threshold,
                                 perceptualThreshold: diffConfig.perceptualThreshold,
                                 message: "Error: \(error.localizedDescription)",
-                                captureData: captureData
+                                captureData: captureData,
+                                steps: stepsByScreen[screenName] ?? []
                             ))
                         }
                     } else {
@@ -255,7 +286,8 @@ struct CICommand: AsyncParsableCommand {
                             pixelThreshold: diffConfig.threshold,
                             perceptualThreshold: diffConfig.perceptualThreshold,
                             message: "New screen — no baseline",
-                            captureData: captureData
+                            captureData: captureData,
+                            steps: stepsByScreen[screenName] ?? []
                         ))
                     }
                 }

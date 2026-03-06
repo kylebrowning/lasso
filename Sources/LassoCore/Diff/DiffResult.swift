@@ -1,5 +1,26 @@
 import Foundation
 
+// MARK: - Step Verification
+
+public enum StepStatus: String, Sendable, Codable {
+    case passed
+    case failed
+}
+
+public struct StepResult: Sendable, Codable {
+    public let action: String
+    public let status: StepStatus
+    public let duration: Double
+    public let message: String?
+
+    public init(action: String, status: StepStatus, duration: Double, message: String? = nil) {
+        self.action = action
+        self.status = status
+        self.duration = duration
+        self.message = message
+    }
+}
+
 // MARK: - Capture Types
 
 public struct ScreenCapture: Sendable, Codable {
@@ -7,12 +28,14 @@ public struct ScreenCapture: Sendable, Codable {
     public let path: String
     public let sizeBytes: Int
     public let timestamp: Date
+    public let steps: [StepResult]
 
-    public init(screenName: String, path: String, sizeBytes: Int, timestamp: Date = Date()) {
+    public init(screenName: String, path: String, sizeBytes: Int, timestamp: Date = Date(), steps: [StepResult] = []) {
         self.screenName = screenName
         self.path = path
         self.sizeBytes = sizeBytes
         self.timestamp = timestamp
+        self.steps = steps
     }
 
     enum CodingKeys: String, CodingKey {
@@ -20,6 +43,7 @@ public struct ScreenCapture: Sendable, Codable {
         case path
         case sizeBytes = "size_bytes"
         case timestamp
+        case steps
     }
 }
 

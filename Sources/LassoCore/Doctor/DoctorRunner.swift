@@ -10,7 +10,6 @@ public struct DoctorRunner: Sendable {
         checks.append(await checkXcode())
         checks.append(await checkXcodeVersion())
         checks.append(await checkBootedSimulator())
-        checks.append(await checkSimctlType())
         checks.append(await checkDriverCache())
 
         // Project
@@ -62,29 +61,6 @@ public struct DoctorRunner: Sendable {
                 name: "Booted Simulator", status: .warning,
                 message: "No simulator booted",
                 fix: "Run: xcrun simctl boot \"iPhone 16\""
-            )
-        }
-    }
-
-    func checkSimctlType() async -> DoctorCheck {
-        do {
-            let help = try await shell("xcrun simctl io --help 2>&1")
-            if help.contains("type") {
-                return DoctorCheck(
-                    name: "Text Input", status: .ok,
-                    message: "xcrun simctl io type available", fix: nil
-                )
-            }
-            return DoctorCheck(
-                name: "Text Input", status: .warning,
-                message: "simctl type not available — requires Xcode 14.3+",
-                fix: "Update Xcode"
-            )
-        } catch {
-            return DoctorCheck(
-                name: "Text Input", status: .warning,
-                message: "Could not check simctl type support",
-                fix: "Ensure Xcode command line tools are installed"
             )
         }
     }
