@@ -19,7 +19,7 @@ public struct DoctorRunner: Sendable {
 
         // CI / Cloud
         checks.append(checkLassoAuth())
-        checks.append(checkGitHubToken())
+        checks.append(checkGitHubApp())
 
         return checks
     }
@@ -61,7 +61,7 @@ public struct DoctorRunner: Sendable {
             return DoctorCheck(
                 name: "Booted Simulator", status: .warning,
                 message: "No simulator booted",
-                fix: "Run: lasso sim boot \"iPhone 16\""
+                fix: "Run: xcrun simctl boot \"iPhone 16\""
             )
         }
     }
@@ -162,14 +162,15 @@ public struct DoctorRunner: Sendable {
         )
     }
 
-    func checkGitHubToken() -> DoctorCheck {
-        if ProcessInfo.processInfo.environment["GITHUB_TOKEN"] != nil {
-            return DoctorCheck(name: "GitHub Token", status: .ok, message: "GITHUB_TOKEN set", fix: nil, section: .cloud)
+    func checkGitHubApp() -> DoctorCheck {
+        if ProcessInfo.processInfo.environment["GITHUB_APP_ID"] != nil,
+           ProcessInfo.processInfo.environment["GITHUB_APP_PRIVATE_KEY"] != nil {
+            return DoctorCheck(name: "GitHub App", status: .ok, message: "GITHUB_APP_ID and GITHUB_APP_PRIVATE_KEY set", fix: nil, section: .cloud)
         }
         return DoctorCheck(
-            name: "GitHub Token", status: .warning,
-            message: "GITHUB_TOKEN not set",
-            fix: "Export GITHUB_TOKEN for PR comment posting",
+            name: "GitHub App", status: .warning,
+            message: "GitHub App not configured — Check Runs won't be posted",
+            fix: "Install the GitHub App from your Lasso Range dashboard settings",
             section: .cloud
         )
     }

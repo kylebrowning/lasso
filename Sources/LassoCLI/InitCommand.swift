@@ -4,7 +4,7 @@ import Foundation
 struct InitCommand: AsyncParsableCommand {
     static let configuration = CommandConfiguration(
         commandName: "init",
-        abstract: "Generate lasso.yml and .mcp.json in the current directory."
+        abstract: "Generate lasso.yml in the current directory."
     )
 
     @Option(name: .long, help: "Scheme name")
@@ -39,41 +39,16 @@ struct InitCommand: AsyncParsableCommand {
               threshold: 0.02
               perceptual_threshold: 5.0
 
-            a11y:
-              fail_on_new_violations: true
-              rules:
-                - missing_label
-                - small_tap_target
-
-            size:
-              warn_mb: 0.5
-              fail_mb: 2.0
-
-            ai:
-              provider: none
+            # a11y:
+            #   fail_on_new_violations: true
+            #   rules:
+            #     - missing_label
+            #     - small_tap_target
             """
             try yaml.write(toFile: configPath, atomically: true, encoding: .utf8)
             print("Created lasso.yml")
         }
 
-        // Generate .mcp.json
-        let mcpPath = "\(cwd)/.mcp.json"
-        if fm.fileExists(atPath: mcpPath) {
-            print(".mcp.json already exists — skipping")
-        } else {
-            let mcpJSON = """
-            {
-              "mcpServers": {
-                "lasso": {
-                  "command": "lasso",
-                  "args": ["mcp"]
-                }
-              }
-            }
-            """
-            try mcpJSON.write(toFile: mcpPath, atomically: true, encoding: .utf8)
-            print("Created .mcp.json")
-        }
     }
 
     private func detectScheme() -> String? {
