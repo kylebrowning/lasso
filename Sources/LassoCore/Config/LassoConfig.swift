@@ -21,18 +21,30 @@ public struct LassoConfig: Sendable, Codable {
             public var tap: String?
             public var swipe: String?
             public var type: String?
+            public var wait: Double?
             public var assertVisible: String?
+            public var assertNotVisible: String?
+            public var runFlow: String?
 
-            public init(tap: String? = nil, swipe: String? = nil, type: String? = nil, assertVisible: String? = nil) {
+            public init(
+                tap: String? = nil, swipe: String? = nil, type: String? = nil,
+                wait: Double? = nil, assertVisible: String? = nil,
+                assertNotVisible: String? = nil, runFlow: String? = nil
+            ) {
                 self.tap = tap
                 self.swipe = swipe
                 self.type = type
+                self.wait = wait
                 self.assertVisible = assertVisible
+                self.assertNotVisible = assertNotVisible
+                self.runFlow = runFlow
             }
 
             enum CodingKeys: String, CodingKey {
-                case tap, swipe, type
+                case tap, swipe, type, wait
                 case assertVisible = "assert_visible"
+                case assertNotVisible = "assert_not_visible"
+                case runFlow = "run_flow"
             }
         }
 

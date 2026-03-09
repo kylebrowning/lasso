@@ -8,9 +8,12 @@ public enum ScriptStep: Sendable, Codable, Equatable {
     case wait(seconds: Double)
     case screenshot(name: String?)
     case back
+    case assertVisible(label: String)
+    case assertNotVisible(label: String)
+    case runFlow(path: String)
 
     enum CodingKeys: String, CodingKey {
-        case action, label, x, y, direction, text, seconds, name
+        case action, label, x, y, direction, text, seconds, name, path
     }
 
     public init(from decoder: any Decoder) throws {
@@ -40,10 +43,19 @@ public enum ScriptStep: Sendable, Codable, Equatable {
             self = .screenshot(name: name)
         case "back":
             self = .back
+        case "assert_visible":
+            let label = try container.decode(String.self, forKey: .label)
+            self = .assertVisible(label: label)
+        case "assert_not_visible":
+            let label = try container.decode(String.self, forKey: .label)
+            self = .assertNotVisible(label: label)
+        case "run_flow":
+            let path = try container.decode(String.self, forKey: .path)
+            self = .runFlow(path: path)
         default:
             throw DecodingError.dataCorruptedError(
                 forKey: .action, in: container,
-                debugDescription: "Unknown action: \(action). Valid: tap, swipe, type, wait, screenshot, back"
+                debugDescription: "Unknown action: \(action). Valid: tap, swipe, type, wait, screenshot, back, assert_visible, assert_not_visible, run_flow"
             )
         }
     }
@@ -72,6 +84,15 @@ public enum ScriptStep: Sendable, Codable, Equatable {
             try container.encodeIfPresent(name, forKey: .name)
         case .back:
             try container.encode("back", forKey: .action)
+        case .assertVisible(let label):
+            try container.encode("assert_visible", forKey: .action)
+            try container.encode(label, forKey: .label)
+        case .assertNotVisible(let label):
+            try container.encode("assert_not_visible", forKey: .action)
+            try container.encode(label, forKey: .label)
+        case .runFlow(let path):
+            try container.encode("run_flow", forKey: .action)
+            try container.encode(path, forKey: .path)
         }
     }
 
@@ -84,6 +105,9 @@ public enum ScriptStep: Sendable, Codable, Equatable {
         case .wait(let s): return "wait \(s)s"
         case .screenshot(let name): return "screenshot\(name.map { " \"\($0)\"" } ?? "")"
         case .back: return "back"
+        case .assertVisible(let label): return "assert visible \"\(label)\""
+        case .assertNotVisible(let label): return "assert not visible \"\(label)\""
+        case .runFlow(let path): return "run flow \"\(path)\""
         }
     }
 }
