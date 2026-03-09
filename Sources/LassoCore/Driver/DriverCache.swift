@@ -55,16 +55,10 @@ extension DriverCache {
         isValid: {
             guard let info = loadInfo() else { return false }
             guard let xcodeVersion = await currentXcodeVersion() else { return false }
-            let xcodeMatches = info.xcodeVersion == xcodeVersion.version
+            // XCUITest bundles are only compatible with the exact Xcode that built them.
+            // Always require a match — we can rebuild from source on any machine.
+            return info.xcodeVersion == xcodeVersion.version
                 && info.xcodeBuildVersion == xcodeVersion.build
-            if xcodeMatches { return true }
-            // If source project isn't available (installed via brew/mint),
-            // accept any cached driver for the same lasso version
-            let hasSource = (try? DriverPathResolver.live.resolve()) != nil
-            if !hasSource && info.lassoVersion == lassoVersion {
-                return true
-            }
-            return false
         },
         cachedXCTestRunPath: {
             findXCTestRun(in: productsDir)
@@ -74,11 +68,11 @@ extension DriverCache {
             return FileManager.default.fileExists(atPath: path) ? path : nil
         },
         buildAndCache: { simulatorName in
-            // Try to find the driver source project locally
+            // Try to find the driver source project locally, otherwise clone from GitHub
             if let driverProjectPath = try? DriverPathResolver.live.resolve() {
                 try await buildFromSource(driverProjectPath, simulatorName: simulatorName)
             } else {
-                try await downloadPrebuilt()
+                try await cloneAndBuildFromRemote(simulatorName: simulatorName)
             }
         },
         xctestrunPath: {
@@ -148,46 +142,46 @@ extension DriverCache {
     }
 }
 
-// MARK: - Download Prebuilt
+// MARK: - Clone and Build from Remote
 
 extension DriverCache {
-    static let driverAssetName = "lasso-driver-\(lassoVersion)-macos.tar.gz"
-    static let downloadURL = "https://github.com/kylebrowning/lasso/releases/download/\(lassoVersion)/\(driverAssetName)"
+    static let driverRepoURL = "https://github.com/kylebrowning/lasso.git"
 
-    static func downloadPrebuilt() async throws {
+    /// Clone the driver source from GitHub and build it locally.
+    /// Used when `Apps/LassoDriver/` is not available (e.g. Homebrew install on CI).
+    /// XCUITest bundles must be built with the exact Xcode on the machine that runs them.
+    static func cloneAndBuildFromRemote(simulatorName: String) async throws {
         let fm = FileManager.default
+        let tempDir = fm.temporaryDirectory
+            .appendingPathComponent("lasso-driver-build")
+            .path
 
-        // Clear and recreate cache dir
-        if fm.fileExists(atPath: cacheDir) {
-            try fm.removeItem(atPath: cacheDir)
+        if fm.fileExists(atPath: tempDir) {
+            try fm.removeItem(atPath: tempDir)
         }
-        try fm.createDirectory(atPath: cacheDir, withIntermediateDirectories: true)
 
-        let tarPath = "\(cacheDir)/\(driverAssetName)"
+        defer {
+            try? fm.removeItem(atPath: tempDir)
+        }
 
-        // Download using curl (available on all macOS)
-        let curlCmd = "curl -fSL -o '\(tarPath)' '\(downloadURL)'"
-        do {
-            _ = try await shell(curlCmd)
-        } catch {
+        // Shallow clone with sparse checkout — only fetch Apps/LassoDriver/
+        _ = try await shell(
+            "git clone --depth 1 --filter=blob:none --sparse '\(driverRepoURL)' '\(tempDir)'"
+        )
+        _ = try await shell(
+            "git -C '\(tempDir)' sparse-checkout set Apps/LassoDriver"
+        )
+
+        let driverProjectPath = "\(tempDir)/Apps/LassoDriver/LassoDriver.xcodeproj"
+        guard fm.fileExists(atPath: driverProjectPath) else {
             throw LassoError.commandFailed(
-                "Failed to download prebuilt driver from \(downloadURL). "
-                + "If you cloned the lasso repo, run 'lasso driver build' to build from source.",
+                "Failed to fetch LassoDriver source from GitHub. "
+                + "Ensure \(driverRepoURL) is accessible, or set GITHUB_TOKEN for private repos.",
                 1
             )
         }
 
-        // Extract — the tar contains a Products/ directory and driver-info.json
-        _ = try await shell("tar -xzf '\(tarPath)' -C '\(cacheDir)'")
-        try fm.removeItem(atPath: tarPath)
-
-        // Verify extraction produced what we need
-        guard fm.fileExists(atPath: productsDir) else {
-            throw LassoError.commandFailed(
-                "Downloaded driver archive did not contain expected Products/ directory",
-                1
-            )
-        }
+        try await buildFromSource(driverProjectPath, simulatorName: simulatorName)
     }
 }
 

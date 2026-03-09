@@ -22,6 +22,8 @@ extension DriverPathResolver {
             cwd.appendingPathComponent("../LassoDriver/LassoDriver.xcodeproj"),
             // From binary location (e.g. .build/debug/)
             binaryDir.appendingPathComponent("../../Apps/LassoDriver/LassoDriver.xcodeproj"),
+            // Homebrew share directory (brew --prefix)/share/lasso/
+            binaryDir.appendingPathComponent("../share/lasso/Apps/LassoDriver/LassoDriver.xcodeproj"),
         ]
         if let found = candidates.first(where: { fm.fileExists(atPath: $0.path) }) {
             return found.path
