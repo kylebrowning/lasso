@@ -1,1 +1,1 @@
-public let lassoVersion = "0.4.3"
+public let lassoVersion = "0.4.4"
