@@ -87,7 +87,7 @@ struct AuthCommand: AsyncParsableCommand {
 
         private func loginWithBrowser() async throws {
             // 1. Create a CLI session
-            let sessionURL = URL(string: "\(baseURL)/auth/cli/sessions")!
+            let sessionURL = URL(string: "\(baseURL)/api/v1/auth/cli/sessions")!
             var createRequest = URLRequest(url: sessionURL)
             createRequest.httpMethod = "POST"
             createRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -102,7 +102,7 @@ struct AuthCommand: AsyncParsableCommand {
             let session = try JSONDecoder().decode(CreateSessionResponse.self, from: createData)
 
             // 2. Open browser
-            let loginURL = "\(baseURL)/auth/cli?session=\(session.sessionId)"
+            let loginURL = "\(baseURL)/api/v1/auth/cli?session=\(session.sessionId)"
             let process = Process()
             process.executableURL = URL(fileURLWithPath: "/usr/bin/open")
             process.arguments = [loginURL]
@@ -116,7 +116,7 @@ struct AuthCommand: AsyncParsableCommand {
             }
 
             // 3. Poll for completion
-            let pollURL = URL(string: "\(baseURL)/auth/cli/sessions/\(session.sessionId)")!
+            let pollURL = URL(string: "\(baseURL)/api/v1/auth/cli/sessions/\(session.sessionId)")!
             let timeout: TimeInterval = 300 // 5 minutes
             let interval: TimeInterval = 2
             let start = Date()

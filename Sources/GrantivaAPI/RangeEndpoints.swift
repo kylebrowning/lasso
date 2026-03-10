@@ -18,44 +18,46 @@ private extension CharacterSet {
 
 enum AuthEndpoints {
     static func me() -> Endpoint<EmptyBody, MeResponse> {
-        Endpoint(path: "auth/me", method: .get)
+        Endpoint(path: "api/v1/auth/me", method: .get)
     }
 }
 
 // MARK: - Baseline Endpoints
 
 enum BaselineEndpoints {
+    private static let prefix = "api/v1/vrt/baselines"
+
     static func list(project: String, branch: String) -> Endpoint<EmptyBody, BaselineListResponse> {
         Endpoint(
-            path: "baselines/\(encodedSegment(project))/\(encodedSegment(branch))",
+            path: "\(prefix)/\(encodedSegment(project))/\(encodedSegment(branch))",
             method: .get
         )
     }
 
     static func download(project: String, branch: String, screen: String) -> Endpoint<EmptyBody, EmptyResponse> {
         Endpoint(
-            path: "baselines/\(encodedSegment(project))/\(encodedSegment(branch))/\(encodedSegment(screen))",
+            path: "\(prefix)/\(encodedSegment(project))/\(encodedSegment(branch))/\(encodedSegment(screen))",
             method: .get
         )
     }
 
     static func upload(project: String, branch: String, screen: String) -> Endpoint<EmptyBody, EmptyResponse> {
         Endpoint(
-            path: "baselines/\(encodedSegment(project))/\(encodedSegment(branch))/\(encodedSegment(screen))",
+            path: "\(prefix)/\(encodedSegment(project))/\(encodedSegment(branch))/\(encodedSegment(screen))",
             method: .post
         )
     }
 
     static func delete(project: String, branch: String, screen: String) -> Endpoint<EmptyBody, EmptyResponse> {
         Endpoint(
-            path: "baselines/\(encodedSegment(project))/\(encodedSegment(branch))/\(encodedSegment(screen))",
+            path: "\(prefix)/\(encodedSegment(project))/\(encodedSegment(branch))/\(encodedSegment(screen))",
             method: .delete
         )
     }
 
     static func promote(project: String, branch: String, body: PromoteBaselinesRequest) -> Endpoint<PromoteBaselinesRequest, EmptyResponse> {
         Endpoint(
-            path: "baselines/\(encodedSegment(project))/\(encodedSegment(branch))/promote",
+            path: "\(prefix)/\(encodedSegment(project))/\(encodedSegment(branch))/promote",
             method: .post,
             body: body
         )
@@ -65,37 +67,39 @@ enum BaselineEndpoints {
 // MARK: - Run Endpoints
 
 enum RunEndpoints {
+    private static let prefix = "api/v1/vrt/runs"
+
     static func create(project: String) -> Endpoint<EmptyBody, RunResponse> {
         Endpoint(
-            path: "runs/\(encodedSegment(project))",
+            path: "\(prefix)/\(encodedSegment(project))",
             method: .post
         )
     }
 
     static func list(project: String) -> Endpoint<EmptyBody, RunListResponse> {
         Endpoint(
-            path: "runs/\(encodedSegment(project))",
+            path: "\(prefix)/\(encodedSegment(project))",
             method: .get
         )
     }
 
     static func detail(project: String, runId: String) -> Endpoint<EmptyBody, RunDetailResponse> {
         Endpoint(
-            path: "runs/\(encodedSegment(project))/\(runId)",
+            path: "\(prefix)/\(encodedSegment(project))/\(runId)",
             method: .get
         )
     }
 
     static func complete(project: String, runId: String) -> Endpoint<EmptyBody, RunResponse> {
         Endpoint(
-            path: "runs/\(encodedSegment(project))/\(runId)",
+            path: "\(prefix)/\(encodedSegment(project))/\(runId)",
             method: .patch
         )
     }
 
     static func appendLog(project: String, runId: String) -> Endpoint<EmptyBody, EmptyResponse> {
         Endpoint(
-            path: "runs/\(encodedSegment(project))/\(runId)/logs",
+            path: "\(prefix)/\(encodedSegment(project))/\(runId)/logs",
             method: .post
         )
     }
