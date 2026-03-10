@@ -1,0 +1,431 @@
+import ArgumentParser
+import Foundation
+import GrantivaCore
+import GrantivaAPI
+
+struct DiffCommand: AsyncParsableCommand {
+    static let configuration = CommandConfiguration(
+        commandName: "diff",
+        abstract: "Visual regression testing — capture, compare, and approve screenshots.",
+        subcommands: [CaptureCommand.self, CompareCommand.self, ApproveCommand.self]
+    )
+
+    // MARK: - Capture
+
+    struct CaptureCommand: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "capture",
+            abstract: "Navigate to configured screens and capture screenshots."
+        )
+
+        @OptionGroup var options: GlobalOptions
+
+        @Option(name: .long, help: "Scheme to build")
+        var scheme: String?
+
+        @Option(name: .long, help: "Simulator name")
+        var simulator: String?
+
+        @Option(name: .long, help: "Bundle identifier")
+        var bundleId: String?
+
+        @Flag(name: .long, inversion: .prefixedNo, help: "Build, install, and launch app before capturing (default: true)")
+        var run: Bool = true
+
+        var simulatorManager: SimulatorManager = .live
+
+        func run() async throws {
+            let config = try? GrantivaConfig.load()
+            let resolved = try await ResolvedProject.resolve(
+                schemeFlag: scheme, simulatorFlag: simulator, bundleIdFlag: bundleId, config: config
+            )
+
+            guard !resolved.screens.isEmpty else {
+                throw GrantivaError.invalidArgument("No screens configured in grantiva.yml")
+            }
+
+            let outputDir = ".grantiva/captures"
+            let start = Date()
+
+            var device: SimulatorDevice
+            if self.run {
+                // Full lifecycle: boot → build → install → launch → (driver) → capture
+                device = try await simulatorManager.boot(nameOrUDID: resolved.simulator)
+                let destination = "platform=iOS Simulator,name=\(device.name)"
+
+                if !options.json {
+                    print("Building \(resolved.scheme)...")
+                }
+
+                let buildResult = try await XcodeBuildRunner().build(
+                    scheme: resolved.scheme,
+                    workspace: resolved.workspace,
+                    project: resolved.project,
+                    destination: destination
+                )
+
+                guard buildResult.success else {
+                    if options.json {
+                        print(try JSONOutput.string(buildResult))
+                    } else {
+                        print(TableFormatter().formatBuild(buildResult))
+                    }
+                    throw ExitCode.failure
+                }
+
+                // Install and launch
+                if let bundleId = resolved.bundleId {
+                    if let productPath = buildResult.productPath {
+                        try await XcodeBuildRunner().install(
+                            bundleId: bundleId, productPath: productPath, udid: device.udid
+                        )
+                    }
+                    try await XcodeBuildRunner().launch(bundleId: bundleId, udid: device.udid)
+                    // Wait for app to settle after launch
+                    try await Task.sleep(for: .seconds(2))
+                }
+
+                if !options.json {
+                    print("Capturing \(resolved.screens.count) screen(s)...")
+                }
+            } else {
+                // No-run mode: just use the currently booted simulator
+                device = try await simulatorManager.bootedDevice()
+            }
+
+            // Start driver (needed for screenshots on headless CI + navigation)
+            if !options.json {
+                print("Starting driver...")
+            }
+            let session = try await DriverSession.start(
+                udid: device.udid,
+                bundleId: resolved.bundleId,
+                simulatorName: device.name,
+                port: options.driverPort
+            )
+
+            defer {
+                Task { await session.stop() }
+            }
+
+            let captures = try await session.captureAll(resolved.screens, outputDir)
+
+            // Print step-by-step results
+            if !options.json {
+                for capture in captures {
+                    print("\n  \(capture.screenName)")
+                    for step in capture.steps {
+                        let icon = step.status == .passed ? "\u{2713}" : "\u{2717}"
+                        print("    \(icon) \(step.action)")
+                        if let msg = step.message {
+                            print("      \(msg)")
+                        }
+                    }
+                }
+                print("")
+            }
+
+            let result = CaptureResult(
+                screens: captures,
+                directory: outputDir,
+                duration: Date().timeIntervalSince(start)
+            )
+
+            if options.json {
+                print(try JSONOutput.string(result))
+            } else {
+                print(TableFormatter().formatCapture(result))
+            }
+        }
+    }
+
+    // MARK: - Compare
+
+    struct CompareCommand: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "compare",
+            abstract: "Diff current captures against baselines."
+        )
+
+        @OptionGroup var options: GlobalOptions
+
+        @Option(name: .long, help: "Scheme to build")
+        var scheme: String?
+
+        @Option(name: .long, help: "Simulator name")
+        var simulator: String?
+
+        @Option(name: .long, help: "Bundle identifier")
+        var bundleId: String?
+
+        @Flag(name: .long, help: "Capture screenshots before comparing (runs full lifecycle)")
+        var capture = false
+
+        var simulatorManager: SimulatorManager = .live
+        var imageDiffer: ImageDiffer = .live
+
+        func run() async throws {
+            let config = try? GrantivaConfig.load()
+            let captureDir = ".grantiva/captures"
+            let diffDir = ".grantiva/captures/diffs"
+            let start = Date()
+
+            // Optionally capture first (with full lifecycle)
+            if capture {
+                let resolved = try await ResolvedProject.resolve(
+                    schemeFlag: scheme, simulatorFlag: simulator, bundleIdFlag: bundleId, config: config
+                )
+
+                guard !resolved.screens.isEmpty else {
+                    throw GrantivaError.invalidArgument("No screens configured in grantiva.yml")
+                }
+
+                // Full lifecycle: boot → build → install → launch → capture
+                let device = try await simulatorManager.boot(nameOrUDID: resolved.simulator)
+                let destination = "platform=iOS Simulator,name=\(device.name)"
+
+                if !options.json {
+                    print("Building \(resolved.scheme)...")
+                }
+
+                let buildResult = try await XcodeBuildRunner().build(
+                    scheme: resolved.scheme,
+                    workspace: resolved.workspace,
+                    project: resolved.project,
+                    destination: destination
+                )
+
+                guard buildResult.success else {
+                    if options.json {
+                        print(try JSONOutput.string(buildResult))
+                    } else {
+                        print(TableFormatter().formatBuild(buildResult))
+                    }
+                    throw ExitCode.failure
+                }
+
+                if let bid = resolved.bundleId {
+                    if let productPath = buildResult.productPath {
+                        try await XcodeBuildRunner().install(
+                            bundleId: bid, productPath: productPath, udid: device.udid
+                        )
+                    }
+                    try await XcodeBuildRunner().launch(bundleId: bid, udid: device.udid)
+                    try await Task.sleep(for: .seconds(2))
+                }
+
+                // Start driver (needed for screenshots on headless CI + navigation)
+                if !options.json {
+                    print("Starting driver...")
+                }
+                let session = try await DriverSession.start(
+                    udid: device.udid,
+                    bundleId: resolved.bundleId,
+                    simulatorName: device.name,
+                    port: options.driverPort
+                )
+
+                defer {
+                    Task { await session.stop() }
+                }
+
+                if !options.json {
+                    print("Capturing \(resolved.screens.count) screen(s)...")
+                }
+
+                let captures = try await session.captureAll(resolved.screens, captureDir)
+
+                // Print step-by-step results
+                if !options.json {
+                    for capture in captures {
+                        print("\n  \(capture.screenName)")
+                        for step in capture.steps {
+                            let icon = step.status == .passed ? "\u{2713}" : "\u{2717}"
+                            print("    \(icon) \(step.action)")
+                            if let msg = step.message {
+                                print("      \(msg)")
+                            }
+                        }
+                    }
+                    print("")
+                }
+            }
+
+            let diffConfig = config?.diff ?? .init()
+            let fm = FileManager.default
+            let store = try await DiffCommand.resolveBaselineStore()
+            let differ = imageDiffer
+
+            // Create diffs directory
+            if !fm.fileExists(atPath: diffDir) {
+                try fm.createDirectory(atPath: diffDir, withIntermediateDirectories: true)
+            }
+
+            // Find capture files
+            guard fm.fileExists(atPath: captureDir) else {
+                throw GrantivaError.noCaptures(captureDir)
+            }
+            let captureFiles = try fm.contentsOfDirectory(atPath: captureDir)
+                .filter { $0.hasSuffix(".png") }
+                .sorted()
+
+            guard !captureFiles.isEmpty else {
+                throw GrantivaError.noCaptures(captureDir)
+            }
+
+            var screenDiffs: [ScreenDiff] = []
+            var allPassed = true
+
+            for file in captureFiles {
+                let screenName = String(file.dropLast(4))
+                let capturePath = "\(captureDir)/\(file)"
+                let captureData = try Data(contentsOf: URL(fileURLWithPath: capturePath))
+
+                let baselineData = try await store.load(screenName)
+
+                if let baselineData {
+                    do {
+                        let output = try differ.compare(baselineData, captureData)
+                        let pixelPass = output.pixelDiffPercent <= diffConfig.threshold
+                        let perceptualPass = output.perceptualDistance <= diffConfig.perceptualThreshold
+                        let passed = pixelPass && perceptualPass
+
+                        var diffImagePath: String? = nil
+                        if !passed {
+                            allPassed = false
+                            let path = "\(diffDir)/\(screenName)_diff.png"
+                            try output.diffImageData.write(to: URL(fileURLWithPath: path))
+                            diffImagePath = path
+                        }
+
+                        let message = passed
+                            ? "Passed"
+                            : "Failed: pixel=\(String(format: "%.2f%%", output.pixelDiffPercent * 100)) perceptual=\(String(format: "%.1f", output.perceptualDistance))"
+
+                        screenDiffs.append(ScreenDiff(
+                            screenName: screenName,
+                            status: passed ? .passed : .failed,
+                            pixelDiffPercent: output.pixelDiffPercent,
+                            perceptualDistance: output.perceptualDistance,
+                            pixelThreshold: diffConfig.threshold,
+                            perceptualThreshold: diffConfig.perceptualThreshold,
+                            baselinePath: "\(store.baselineDirectory())/\(screenName).png",
+                            capturePath: capturePath,
+                            diffImagePath: diffImagePath,
+                            message: message
+                        ))
+                    } catch {
+                        allPassed = false
+                        screenDiffs.append(ScreenDiff(
+                            screenName: screenName,
+                            status: .error,
+                            pixelThreshold: diffConfig.threshold,
+                            perceptualThreshold: diffConfig.perceptualThreshold,
+                            capturePath: capturePath,
+                            message: "Error: \(error.localizedDescription)"
+                        ))
+                    }
+                } else {
+                    // No baseline — new screen
+                    screenDiffs.append(ScreenDiff(
+                        screenName: screenName,
+                        status: .newScreen,
+                        pixelThreshold: diffConfig.threshold,
+                        perceptualThreshold: diffConfig.perceptualThreshold,
+                        capturePath: capturePath,
+                        message: "New screen — no baseline. Run: grantiva diff approve"
+                    ))
+                }
+            }
+
+            let result = CompareResult(
+                screens: screenDiffs,
+                passed: allPassed,
+                duration: Date().timeIntervalSince(start)
+            )
+
+            if options.json {
+                print(try JSONOutput.string(result))
+            } else {
+                print(TableFormatter().formatCompare(result))
+            }
+
+            if !allPassed {
+                throw ExitCode.failure
+            }
+        }
+    }
+
+    // MARK: - Approve
+
+    struct ApproveCommand: AsyncParsableCommand {
+        static let configuration = CommandConfiguration(
+            commandName: "approve",
+            abstract: "Promote current captures to baselines."
+        )
+
+        @OptionGroup var options: GlobalOptions
+
+        @Argument(help: "Screen names to approve (default: all)")
+        var screenNames: [String] = []
+
+        func run() async throws {
+            let captureDir = ".grantiva/captures"
+            let fm = FileManager.default
+            let store = try await DiffCommand.resolveBaselineStore()
+
+            guard fm.fileExists(atPath: captureDir) else {
+                throw GrantivaError.noCaptures(captureDir)
+            }
+
+            let allCaptures = try fm.contentsOfDirectory(atPath: captureDir)
+                .filter { $0.hasSuffix(".png") }
+                .sorted()
+
+            guard !allCaptures.isEmpty else {
+                throw GrantivaError.noCaptures(captureDir)
+            }
+
+            let toApprove: [String]
+            if screenNames.isEmpty {
+                toApprove = allCaptures.map { String($0.dropLast(4)) }
+            } else {
+                toApprove = screenNames
+            }
+
+            var approved: [String] = []
+            for screenName in toApprove {
+                let capturePath = "\(captureDir)/\(screenName).png"
+                guard fm.fileExists(atPath: capturePath) else {
+                    throw GrantivaError.noCaptures("No capture found for \"\(screenName)\"")
+                }
+                let data = try Data(contentsOf: URL(fileURLWithPath: capturePath))
+                _ = try await store.save(screenName, data)
+                approved.append(screenName)
+            }
+
+            let result = ApproveResult(
+                approvedScreens: approved,
+                baselineDirectory: store.baselineDirectory()
+            )
+
+            if options.json {
+                print(try JSONOutput.string(result))
+            } else {
+                print(TableFormatter().formatApprove(result))
+            }
+        }
+    }
+
+    // MARK: - Baseline Store Resolution
+
+    /// Resolves the baseline store: remote (via RangeClient) if authenticated, local otherwise.
+    static func resolveBaselineStore() async throws -> BaselineStore {
+        if let credentials = AuthStore.resolveCredentials() {
+            let client = RangeClient(apiKey: credentials.apiKey, baseURL: credentials.baseURL)
+            let projectId = try await ProjectIdentifier.resolve()
+            return client.asBaselineStore(project: projectId.projectSlug, branch: projectId.currentBranch)
+        }
+        return .local()
+    }
+}

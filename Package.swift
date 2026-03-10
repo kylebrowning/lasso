@@ -2,11 +2,11 @@
 import PackageDescription
 
 let package = Package(
-    name: "lasso",
+    name: "grantiva",
     platforms: [.macOS(.v15)],
     products: [
-        .executable(name: "lasso", targets: ["lasso"]),
-        .library(name: "LassoCore", targets: ["LassoCore"]),
+        .executable(name: "grantiva", targets: ["grantiva"]),
+        .library(name: "GrantivaCore", targets: ["GrantivaCore"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.5.0"),
@@ -14,26 +14,26 @@ let package = Package(
         .package(url: "https://github.com/jpsim/Yams", from: "5.3.0"),
     ],
     targets: [
-        .executableTarget(name: "lasso", dependencies: ["LassoCLI"]),
+        .executableTarget(name: "grantiva", dependencies: ["GrantivaCLI"]),
         .target(
-            name: "LassoCLI",
+            name: "GrantivaCLI",
             dependencies: [
-                "LassoCore", "LassoRange",
+                "GrantivaCore", "GrantivaAPI",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
             ]
         ),
         .target(
-            name: "LassoCore",
+            name: "GrantivaCore",
             dependencies: [
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "Yams", package: "Yams"),
             ]
         ),
-        .target(name: "LassoRange", dependencies: ["LassoCore"]),
-        .testTarget(name: "LassoCoreTests", dependencies: [
-            "LassoCore",
+        .target(name: "GrantivaAPI", dependencies: ["GrantivaCore"]),
+        .testTarget(name: "GrantivaCoreTests", dependencies: [
+            "GrantivaCore",
             .product(name: "Yams", package: "Yams"),
         ]),
-        .testTarget(name: "LassoRangeTests", dependencies: ["LassoRange"]),
+        .testTarget(name: "GrantivaAPITests", dependencies: ["GrantivaAPI"]),
     ]
 )
