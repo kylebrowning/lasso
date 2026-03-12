@@ -17,6 +17,8 @@ public enum GrantivaError: Error, LocalizedError, Sendable {
     case networkError(String, Int)
     case baselineNotFound(String)
     case appNotFound(String)
+    case invalidBinary(String)
+    case ipaExtractionFailed(String)
     case driverNotRunning
 
     public var errorDescription: String? {
@@ -53,6 +55,10 @@ public enum GrantivaError: Error, LocalizedError, Sendable {
             return "Baseline not found for screen \"\(screen)\""
         case .appNotFound(let path):
             return "App bundle not found at \"\(path)\". Verify the path exists or run a build first."
+        case .invalidBinary(let reason):
+            return "Invalid app binary: \(reason)"
+        case .ipaExtractionFailed(let reason):
+            return "IPA extraction failed: \(reason)"
         case .driverNotRunning:
             return "Driver is not running. Start it first: grantiva driver start"
         }

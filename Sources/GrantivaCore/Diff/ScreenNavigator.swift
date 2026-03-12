@@ -262,11 +262,15 @@ extension ScreenNavigator {
 
 // MARK: - Flow Loading
 
-/// Load steps from a flow YAML file. The file should contain an array of steps:
+/// Load steps from a flow YAML file. Supports both Grantiva and Maestro formats:
 /// ```yaml
+/// # Grantiva format:
 /// - tap: "Login"
 /// - type: "user@example.com"
-/// - tap: "Submit"
+///
+/// # Maestro format:
+/// - tapOn: "Login"
+/// - inputText: "user@example.com"
 /// ```
 func loadFlowSteps(from path: String) throws -> [GrantivaConfig.Screen.Step] {
     let url = URL(fileURLWithPath: path)
@@ -274,6 +278,12 @@ func loadFlowSteps(from path: String) throws -> [GrantivaConfig.Screen.Step] {
         throw GrantivaError.invalidArgument("Flow file not found: \(path)")
     }
     let contents = try String(contentsOf: url, encoding: .utf8)
+
+    // Auto-detect Maestro format
+    if MaestroFlowParser.isMaestroFormat(contents) {
+        return try MaestroFlowParser.parseSteps(contents)
+    }
+
     let decoder = YAMLDecoder()
     return try decoder.decode([GrantivaConfig.Screen.Step].self, from: contents)
 }

@@ -157,13 +157,29 @@ public struct GrantivaConfig: Sendable, Codable {
     }
 
     public static func load(from directory: URL = URL(fileURLWithPath: FileManager.default.currentDirectoryPath)) throws -> GrantivaConfig {
+        let fm = FileManager.default
+
+        // 1. Try grantiva.yml (Grantiva or Maestro format)
         let configURL = directory.appendingPathComponent("grantiva.yml")
-        guard FileManager.default.fileExists(atPath: configURL.path) else {
-            throw GrantivaError.configNotFound
+        if fm.fileExists(atPath: configURL.path) {
+            let contents = try String(contentsOf: configURL, encoding: .utf8)
+
+            // Auto-detect Maestro format
+            if MaestroFlowParser.isMaestroFormat(contents) {
+                return try MaestroFlowParser.parse(contents)
+            }
+
+            let decoder = YAMLDecoder()
+            return try decoder.decode(GrantivaConfig.self, from: contents)
         }
-        let contents = try String(contentsOf: configURL, encoding: .utf8)
-        let decoder = YAMLDecoder()
-        return try decoder.decode(GrantivaConfig.self, from: contents)
+
+        // 2. Try .maestro/ directory (Maestro flow files)
+        let maestroDir = directory.appendingPathComponent(".maestro")
+        if fm.fileExists(atPath: maestroDir.path) {
+            return try MaestroFlowParser.loadDirectory(maestroDir)
+        }
+
+        throw GrantivaError.configNotFound
     }
 }
 

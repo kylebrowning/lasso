@@ -11,35 +11,36 @@ struct GlobalOptions: ParsableArguments {
 }
 
 struct BuildOptions: ParsableArguments {
-    @Flag(name: .long, help: "Skip building — use existing build artifacts from DerivedData.")
-    var skipBuild: Bool = false
+    @Option(name: .long, help: "Path to a pre-built .app bundle or .ipa archive. Skips the build step.")
+    var appFile: String?
 
-    @Option(name: .long, help: "Path to a pre-built .app bundle. Implies --skip-build.")
-    var appPath: String?
+    @Flag(name: .long, help: "Skip building and installing — assume the app is already on the simulator.")
+    var noBuild: Bool = false
 
-    var shouldSkipBuild: Bool { skipBuild || appPath != nil }
+    /// True when the xcodebuild step should be skipped.
+    var shouldSkipBuild: Bool { noBuild || appFile != nil }
 
-    /// Resolves the product path when skipping build.
-    /// Returns nil if build should proceed normally.
-    func resolveProductPath(
-        scheme: String, workspace: String?, project: String?, destination: String
-    ) async throws -> String? {
-        if let appPath {
-            let abs = (appPath as NSString).standardizingPath
-            guard FileManager.default.fileExists(atPath: abs) else {
-                throw GrantivaError.appNotFound(abs)
-            }
-            return abs
+    /// True when the install/launch step should be skipped (app already on sim).
+    var shouldSkipInstall: Bool { noBuild }
+
+    /// Resolves the product path for the app binary.
+    /// - When `--app-file` is set: resolves the binary (extracting IPA if needed), validates it.
+    /// - When `--no-build` is set: returns nil (no binary to install).
+    /// - Otherwise: returns nil (caller should build normally).
+    func resolveAppBinary() throws -> ResolvedBinary? {
+        guard let appFile else { return nil }
+        return try AppBinaryResolver.resolve(appFile)
+    }
+
+    /// Derives a bundle ID from the app binary if one was provided.
+    func deriveBundleId() -> String? {
+        guard let appFile else { return nil }
+        let absPath = (appFile as NSString).standardizingPath
+        if absPath.hasSuffix(".app") {
+            return AppBinaryResolver.bundleId(from: absPath)
         }
-        if skipBuild {
-            let path = try await XcodeBuildRunner().resolveProductPath(
-                scheme: scheme, workspace: workspace, project: project, destination: destination
-            )
-            guard FileManager.default.fileExists(atPath: path) else {
-                throw GrantivaError.appNotFound(path)
-            }
-            return path
-        }
+        // For IPA, we'd need to extract first — bundle ID derivation
+        // happens after resolve in the command flow.
         return nil
     }
 }

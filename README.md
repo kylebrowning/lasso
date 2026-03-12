@@ -45,7 +45,7 @@ grantiva ci run
 ## How It Works
 
 1. **Boot** — boots the configured simulator
-2. **Build** — builds the app with `xcodebuild`
+2. **Build** — builds the app with `xcodebuild` (or skip with `--app-file` / `--no-build`)
 3. **Launch** — installs and launches the app
 4. **Navigate** — taps and swipes to each screen defined in `grantiva.yml`
 5. **Capture** — screenshots each screen via the XCUITest driver
@@ -83,10 +83,34 @@ Each screen has a `name` and a `path`. The path describes how to navigate there:
 
 - `launch` — screenshot immediately after app launch
 - `- tap: "Label"` — tap a button or element by accessibility label
-- `- swipe: up` — swipe in a direction
+- `- swipe: up` — swipe in a direction (`up`, `down`, `left`, `right`)
+- `- type: "text"` — type text into the focused field
 - `- wait: 2` — wait N seconds
+- `- assert_visible: "Label"` — verify an element is visible (fails if not)
+- `- assert_not_visible: "Label"` — verify an element is hidden
+- `- run_flow: "path/to/flow.yaml"` — include steps from another YAML file
 
 Grantiva navigates to each screen in order, captures a screenshot, then moves to the next.
+
+### Maestro Compatibility
+
+Grantiva can read [Maestro](https://maestro.mobile.dev) flow files as a drop-in replacement. If you have existing Maestro flows, Grantiva will auto-detect and parse them — no rewrite needed.
+
+Place your flows in a `.maestro/` directory, or write `grantiva.yml` in Maestro format:
+
+```yaml
+appId: com.example.myapp
+---
+- launchApp
+- tapOn: "Sign In"
+- inputText: "user@example.com"
+- takeScreenshot: "Login"
+- tapOn: "Submit"
+- assertVisible: "Welcome"
+- takeScreenshot: "Welcome"
+```
+
+Each `takeScreenshot` becomes a named screen capture point. Commands between screenshots become navigation steps. Supported Maestro commands: `tapOn`, `inputText`, `assertVisible`, `assertNotVisible`, `swipe`, `scroll`, `runFlow`, `extendedWaitUntil`, `waitForAnimationToEnd`, and `takeScreenshot`. Unsupported commands (scripting, permissions, etc.) are silently skipped.
 
 ## CI Integration
 
@@ -110,12 +134,57 @@ jobs:
         run: grantiva ci run
 ```
 
-If your app is already built by a previous step:
+### Pre-built binaries
+
+Grantiva can consume pre-built `.app` bundles or `.ipa` archives, decoupling the build from the test:
+
+```bash
+# Use a pre-built .app bundle (skips xcodebuild, still installs)
+grantiva ci run --app-file ./build/MyApp.app
+
+# Use an .ipa from a CI artifact
+grantiva ci run --app-file ./artifacts/MyApp.ipa
+
+# App is already installed on the simulator (skip build and install)
+grantiva ci run --no-build
+```
+
+When `--app-file` is provided, `scheme` is not required in `grantiva.yml` — the bundle ID is derived from the binary's `Info.plist`. The binary is validated to be a simulator build before install.
+
+This enables split build/test workflows in CI:
 
 ```yaml
-      - run: grantiva ci run --skip-build
-      # Or point to a pre-built .app
-      - run: grantiva ci run --app-path ./build/MyApp.app
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build
+        run: |
+          xcodebuild build -scheme MyApp \
+            -destination 'generic/platform=iOS Simulator' \
+            -derivedDataPath build/
+      - uses: actions/upload-artifact@v4
+        with:
+          name: app-binary
+          path: build/Build/Products/Debug-iphonesimulator/MyApp.app
+
+  visual-regression:
+    needs: build
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: app-binary
+          path: ./app
+      - name: Install Grantiva CLI
+        run: brew install grantiva/tap/grantiva
+      - name: Visual regression
+        env:
+          GRANTIVA_API_KEY: ${{ secrets.GRANTIVA_API_KEY }}
+        run: |
+          grantiva ci run --app-file ./app/MyApp.app
 ```
 
 Results upload to the [Grantiva](https://grantiva.io) dashboard and post as GitHub Check Runs on your PRs.

@@ -238,3 +238,307 @@ final class GrantivaCoreTests: XCTestCase {
 }
 
 import Yams
+
+// MARK: - MaestroFlowParser Tests
+
+final class MaestroFlowParserTests: XCTestCase {
+
+    func testIsMaestroFormatDetection() {
+        XCTAssertTrue(MaestroFlowParser.isMaestroFormat("appId: com.example.app\n---\n- launchApp"))
+        XCTAssertTrue(MaestroFlowParser.isMaestroFormat("- tapOn: \"Login\""))
+        XCTAssertTrue(MaestroFlowParser.isMaestroFormat("- launchApp"))
+        XCTAssertTrue(MaestroFlowParser.isMaestroFormat("- inputText: \"hello\""))
+        XCTAssertTrue(MaestroFlowParser.isMaestroFormat("- assertVisible: \"Welcome\""))
+        XCTAssertTrue(MaestroFlowParser.isMaestroFormat("- takeScreenshot: \"Home\""))
+
+        // Grantiva format should NOT be detected as Maestro
+        XCTAssertFalse(MaestroFlowParser.isMaestroFormat("scheme: MyApp\nscreens:\n  - name: Home\n    path: launch"))
+        XCTAssertFalse(MaestroFlowParser.isMaestroFormat("screens:\n  - name: Home"))
+    }
+
+    func testParseFullMaestroFlow() throws {
+        let yaml = """
+        appId: com.example.myapp
+        name: Login Flow
+        ---
+        - launchApp
+        - tapOn: "Sign In"
+        - inputText: "user@example.com"
+        - takeScreenshot: "Login"
+        - tapOn: "Submit"
+        - assertVisible: "Welcome"
+        - takeScreenshot: "Welcome"
+        """
+
+        let config = try MaestroFlowParser.parse(yaml)
+        XCTAssertEqual(config.bundleId, "com.example.myapp")
+        XCTAssertEqual(config.screens.count, 2)
+
+        // First screen: "Login" — has tap + type steps
+        XCTAssertEqual(config.screens[0].name, "Login")
+        if case .steps(let steps) = config.screens[0].path {
+            XCTAssertEqual(steps.count, 2)
+            XCTAssertEqual(steps[0].tap, "Sign In")
+            XCTAssertEqual(steps[1].type, "user@example.com")
+        } else {
+            XCTFail("Expected steps, got launch")
+        }
+
+        // Second screen: "Welcome" — has tap + assert steps
+        XCTAssertEqual(config.screens[1].name, "Welcome")
+        if case .steps(let steps) = config.screens[1].path {
+            XCTAssertEqual(steps.count, 2)
+            XCTAssertEqual(steps[0].tap, "Submit")
+            XCTAssertEqual(steps[1].assertVisible, "Welcome")
+        } else {
+            XCTFail("Expected steps, got launch")
+        }
+    }
+
+    func testParseMaestroFlowWithoutConfig() throws {
+        let yaml = """
+        - tapOn: "Login"
+        - inputText: "test"
+        - takeScreenshot: "Result"
+        """
+
+        let config = try MaestroFlowParser.parse(yaml)
+        XCTAssertNil(config.bundleId)
+        XCTAssertEqual(config.screens.count, 1)
+        XCTAssertEqual(config.screens[0].name, "Result")
+    }
+
+    func testParseMaestroFlowNoScreenshots() throws {
+        let yaml = """
+        appId: com.example.app
+        ---
+        - launchApp
+        - tapOn: "Button"
+        - assertVisible: "Done"
+        """
+
+        let config = try MaestroFlowParser.parse(yaml)
+        // Remaining steps after no screenshot → one screen
+        XCTAssertEqual(config.screens.count, 1)
+        if case .steps(let steps) = config.screens[0].path {
+            XCTAssertEqual(steps.count, 2)
+            XCTAssertEqual(steps[0].tap, "Button")
+            XCTAssertEqual(steps[1].assertVisible, "Done")
+        } else {
+            XCTFail("Expected steps")
+        }
+    }
+
+    func testParseMaestroLaunchOnly() throws {
+        let yaml = """
+        appId: com.example.app
+        ---
+        - launchApp
+        """
+
+        let config = try MaestroFlowParser.parse(yaml)
+        XCTAssertEqual(config.screens.count, 1)
+        if case .launch = config.screens[0].path {
+            // correct
+        } else {
+            XCTFail("Expected launch path")
+        }
+    }
+
+    func testParseScrollInversion() throws {
+        let yaml = """
+        - scroll:
+            direction: down
+        - takeScreenshot: "Scrolled"
+        """
+
+        let config = try MaestroFlowParser.parse(yaml)
+        if case .steps(let steps) = config.screens[0].path {
+            XCTAssertEqual(steps[0].swipe, "up") // scroll down = swipe up
+        } else {
+            XCTFail("Expected steps")
+        }
+    }
+
+    func testParseBareScrollCommand() throws {
+        let yaml = """
+        - scroll
+        - takeScreenshot: "After Scroll"
+        """
+
+        let config = try MaestroFlowParser.parse(yaml)
+        if case .steps(let steps) = config.screens[0].path {
+            XCTAssertEqual(steps[0].swipe, "up") // default scroll = down = swipe up
+        } else {
+            XCTFail("Expected steps")
+        }
+    }
+
+    func testParseSwipeFromCoordinates() throws {
+        let yaml = """
+        - swipe:
+            start: {x: 200, y: 500}
+            end: {x: 200, y: 100}
+        - takeScreenshot: "Swiped"
+        """
+
+        let config = try MaestroFlowParser.parse(yaml)
+        if case .steps(let steps) = config.screens[0].path {
+            XCTAssertEqual(steps[0].swipe, "up") // y decreases = swipe up
+        } else {
+            XCTFail("Expected steps")
+        }
+    }
+
+    func testParseRunFlowVariants() throws {
+        let yaml = """
+        - runFlow: login.yaml
+        - runFlow:
+            file: checkout.yaml
+        - takeScreenshot: "After Flows"
+        """
+
+        let config = try MaestroFlowParser.parse(yaml)
+        if case .steps(let steps) = config.screens[0].path {
+            XCTAssertEqual(steps.count, 2)
+            XCTAssertEqual(steps[0].runFlow, "login.yaml")
+            XCTAssertEqual(steps[1].runFlow, "checkout.yaml")
+        } else {
+            XCTFail("Expected steps")
+        }
+    }
+
+    func testParseTapSelectorVariants() throws {
+        let yaml = """
+        - tapOn: "Button Text"
+        - tapOn:
+            text: "Other Button"
+        - tapOn:
+            id: "button_id"
+        - takeScreenshot: "Tapped"
+        """
+
+        let config = try MaestroFlowParser.parse(yaml)
+        if case .steps(let steps) = config.screens[0].path {
+            XCTAssertEqual(steps.count, 3)
+            XCTAssertEqual(steps[0].tap, "Button Text")
+            XCTAssertEqual(steps[1].tap, "Other Button")
+            XCTAssertEqual(steps[2].tap, "button_id")
+        } else {
+            XCTFail("Expected steps")
+        }
+    }
+
+    func testParseWaitForAnimationToEnd() throws {
+        let yaml = """
+        - waitForAnimationToEnd:
+            timeout: 3000
+        - takeScreenshot: "Settled"
+        """
+
+        let config = try MaestroFlowParser.parse(yaml)
+        if case .steps(let steps) = config.screens[0].path {
+            XCTAssertEqual(steps[0].wait, 3.0) // 3000ms → 3.0s
+        } else {
+            XCTFail("Expected steps")
+        }
+    }
+
+    func testParseExtendedWaitUntil() throws {
+        let yaml = """
+        - extendedWaitUntil:
+            text: "Loaded"
+            timeout: 10000
+        - takeScreenshot: "Ready"
+        """
+
+        let config = try MaestroFlowParser.parse(yaml)
+        if case .steps(let steps) = config.screens[0].path {
+            XCTAssertEqual(steps[0].assertVisible, "Loaded")
+        } else {
+            XCTFail("Expected steps")
+        }
+    }
+
+    func testParseStepsForRunFlow() throws {
+        let yaml = """
+        appId: com.example.app
+        ---
+        - tapOn: "Login"
+        - inputText: "user@example.com"
+        - tapOn: "Submit"
+        """
+
+        let steps = try MaestroFlowParser.parseSteps(yaml)
+        XCTAssertEqual(steps.count, 3)
+        XCTAssertEqual(steps[0].tap, "Login")
+        XCTAssertEqual(steps[1].type, "user@example.com")
+        XCTAssertEqual(steps[2].tap, "Submit")
+    }
+
+    func testUnsupportedCommandsSkipped() throws {
+        let yaml = """
+        - launchApp
+        - setPermissions:
+            CAMERA: allow
+        - pressKey: RETURN
+        - evalScript: \u{0024}{output.x = 1}
+        - tapOn: "Button"
+        - takeScreenshot: "Result"
+        """
+
+        let config = try MaestroFlowParser.parse(yaml)
+        // Only the tapOn should make it through as a step
+        if case .steps(let steps) = config.screens[0].path {
+            XCTAssertEqual(steps.count, 1)
+            XCTAssertEqual(steps[0].tap, "Button")
+        } else {
+            XCTFail("Expected steps")
+        }
+    }
+
+    func testScreenshotAtStartCreatesLaunchScreen() throws {
+        let yaml = """
+        - launchApp
+        - takeScreenshot: "Launch"
+        - tapOn: "Next"
+        - takeScreenshot: "Second"
+        """
+
+        let config = try MaestroFlowParser.parse(yaml)
+        XCTAssertEqual(config.screens.count, 2)
+
+        // First screenshot has no steps before it → launch
+        if case .launch = config.screens[0].path {
+            // correct
+        } else {
+            XCTFail("Expected launch path for first screen")
+        }
+        XCTAssertEqual(config.screens[0].name, "Launch")
+
+        // Second has a tap step
+        if case .steps(let steps) = config.screens[1].path {
+            XCTAssertEqual(steps[0].tap, "Next")
+        } else {
+            XCTFail("Expected steps for second screen")
+        }
+    }
+
+    func testAssertNotVisibleMapping() throws {
+        let yaml = """
+        - assertNotVisible: "Error Dialog"
+        - assertNotVisible:
+            text: "Loading Spinner"
+        - takeScreenshot: "Clean"
+        """
+
+        let config = try MaestroFlowParser.parse(yaml)
+        if case .steps(let steps) = config.screens[0].path {
+            XCTAssertEqual(steps.count, 2)
+            XCTAssertEqual(steps[0].assertNotVisible, "Error Dialog")
+            XCTAssertEqual(steps[1].assertNotVisible, "Loading Spinner")
+        } else {
+            XCTFail("Expected steps")
+        }
+    }
+}

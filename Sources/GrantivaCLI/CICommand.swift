@@ -54,11 +54,19 @@ struct CICommand: AsyncParsableCommand {
             let diffDir = ".grantiva/captures/diffs"
             let start = Date()
 
+            // Resolve app binary first (if --app-file provided) so we can derive bundle ID
+            let resolvedBinary = try buildOptions.resolveAppBinary()
+            defer { resolvedBinary?.cleanup() }
+
+            let appBundleId = resolvedBinary.flatMap { AppBinaryResolver.bundleId(from: $0.appPath) }
+
             // Resolve project
             let resolved = try await ResolvedProject.resolve(
-                schemeFlag: scheme, simulatorFlag: simulator, bundleIdFlag: bundleId, config: config
+                schemeFlag: scheme, simulatorFlag: simulator, bundleIdFlag: bundleId, config: config,
+                skipBuild: buildOptions.shouldSkipBuild,
+                appBundleId: appBundleId
             )
-            log("Resolved: scheme=\(resolved.scheme) simulator=\(resolved.simulator) screens=\(resolved.screens.count)")
+            log("Resolved: scheme=\(resolved.scheme ?? "(none)") simulator=\(resolved.simulator) screens=\(resolved.screens.count)")
 
             guard !resolved.screens.isEmpty else {
                 throw GrantivaError.invalidArgument("No screens configured in grantiva.yml")
@@ -113,17 +121,22 @@ struct CICommand: AsyncParsableCommand {
 
                 var productPath: String?
 
-                if let resolved_path = try await buildOptions.resolveProductPath(
-                    scheme: resolved.scheme, workspace: resolved.workspace,
-                    project: resolved.project, destination: destination
-                ) {
-                    rlog("Skipping build — using \(resolved_path)")
-                    productPath = resolved_path
+                if buildOptions.shouldSkipInstall {
+                    rlog("Skipping build and install (--no-build)")
+                } else if let resolvedBinary {
+                    rlog("Using pre-built binary: \(URL(fileURLWithPath: resolvedBinary.appPath).lastPathComponent)")
+                    productPath = resolvedBinary.appPath
                 } else {
-                    rlog("Building \(resolved.scheme)...")
+                    guard let buildScheme = resolved.scheme else {
+                        throw GrantivaError.invalidArgument(
+                            "No scheme specified. Pass --scheme, set it in grantiva.yml, or use --app-file to provide a pre-built binary."
+                        )
+                    }
+
+                    rlog("Building \(buildScheme)...")
 
                     let buildResult = try await XcodeBuildRunner().build(
-                        scheme: resolved.scheme,
+                        scheme: buildScheme,
                         workspace: resolved.workspace,
                         project: resolved.project,
                         destination: destination
@@ -141,7 +154,7 @@ struct CICommand: AsyncParsableCommand {
                     productPath = buildResult.productPath
                 }
 
-                if let bid = resolved.bundleId {
+                if !buildOptions.shouldSkipInstall, let bid = resolved.bundleId {
                     if let productPath {
                         rlog("Installing \(bid)...")
                         try await XcodeBuildRunner().install(

@@ -19,6 +19,7 @@ struct DiffCommand: AsyncParsableCommand {
         )
 
         @OptionGroup var options: GlobalOptions
+        @OptionGroup var buildOptions: BuildOptions
 
         @Option(name: .long, help: "Scheme to build")
         var scheme: String?
@@ -29,15 +30,21 @@ struct DiffCommand: AsyncParsableCommand {
         @Option(name: .long, help: "Bundle identifier")
         var bundleId: String?
 
-        @Flag(name: .long, inversion: .prefixedNo, help: "Build, install, and launch app before capturing (default: true)")
-        var run: Bool = true
-
         var simulatorManager: SimulatorManager = .live
 
         func run() async throws {
             let config = try? GrantivaConfig.load()
+
+            // Resolve the app binary first (if provided) so we can derive bundle ID
+            let resolvedBinary = try buildOptions.resolveAppBinary()
+            defer { resolvedBinary?.cleanup() }
+
+            let appBundleId = resolvedBinary.flatMap { AppBinaryResolver.bundleId(from: $0.appPath) }
+
             let resolved = try await ResolvedProject.resolve(
-                schemeFlag: scheme, simulatorFlag: simulator, bundleIdFlag: bundleId, config: config
+                schemeFlag: scheme, simulatorFlag: simulator, bundleIdFlag: bundleId, config: config,
+                skipBuild: buildOptions.shouldSkipBuild,
+                appBundleId: appBundleId
             )
 
             guard !resolved.screens.isEmpty else {
@@ -48,40 +55,59 @@ struct DiffCommand: AsyncParsableCommand {
             let start = Date()
 
             var device: SimulatorDevice
-            if self.run {
-                // Full lifecycle: boot → build → install → launch → (driver) → capture
+
+            if !buildOptions.shouldSkipInstall {
+                // Full lifecycle: boot → build → install → launch → capture
+                // OR: boot → install pre-built → launch → capture
                 device = try await simulatorManager.boot(nameOrUDID: resolved.simulator)
                 let destination = "platform=iOS Simulator,name=\(device.name)"
 
-                if !options.json {
-                    print("Building \(resolved.scheme)...")
-                }
+                var productPath: String?
 
-                let buildResult = try await XcodeBuildRunner().build(
-                    scheme: resolved.scheme,
-                    workspace: resolved.workspace,
-                    project: resolved.project,
-                    destination: destination
-                )
-
-                guard buildResult.success else {
-                    if options.json {
-                        print(try JSONOutput.string(buildResult))
-                    } else {
-                        print(TableFormatter().formatBuild(buildResult))
+                if let resolvedBinary {
+                    // Pre-built binary provided via --app-file
+                    if !options.json {
+                        print("Using pre-built binary: \(URL(fileURLWithPath: resolvedBinary.appPath).lastPathComponent)")
                     }
-                    throw ExitCode.failure
+                    productPath = resolvedBinary.appPath
+                } else {
+                    // Build from source
+                    guard let buildScheme = resolved.scheme else {
+                        throw GrantivaError.invalidArgument(
+                            "No scheme specified. Pass --scheme, set it in grantiva.yml, or use --app-file to provide a pre-built binary."
+                        )
+                    }
+
+                    if !options.json {
+                        print("Building \(buildScheme)...")
+                    }
+
+                    let buildResult = try await XcodeBuildRunner().build(
+                        scheme: buildScheme,
+                        workspace: resolved.workspace,
+                        project: resolved.project,
+                        destination: destination
+                    )
+
+                    guard buildResult.success else {
+                        if options.json {
+                            print(try JSONOutput.string(buildResult))
+                        } else {
+                            print(TableFormatter().formatBuild(buildResult))
+                        }
+                        throw ExitCode.failure
+                    }
+                    productPath = buildResult.productPath
                 }
 
                 // Install and launch
-                if let bundleId = resolved.bundleId {
-                    if let productPath = buildResult.productPath {
+                if let bid = resolved.bundleId {
+                    if let productPath {
                         try await XcodeBuildRunner().install(
-                            bundleId: bundleId, productPath: productPath, udid: device.udid
+                            bundleId: bid, productPath: productPath, udid: device.udid
                         )
                     }
-                    try await XcodeBuildRunner().launch(bundleId: bundleId, udid: device.udid)
-                    // Wait for app to settle after launch
+                    try await XcodeBuildRunner().launch(bundleId: bid, udid: device.udid)
                     try await Task.sleep(for: .seconds(2))
                 }
 
@@ -89,7 +115,7 @@ struct DiffCommand: AsyncParsableCommand {
                     print("Capturing \(resolved.screens.count) screen(s)...")
                 }
             } else {
-                // No-run mode: just use the currently booted simulator
+                // --no-build: just use the currently booted simulator
                 device = try await simulatorManager.bootedDevice()
             }
 
@@ -148,6 +174,7 @@ struct DiffCommand: AsyncParsableCommand {
         )
 
         @OptionGroup var options: GlobalOptions
+        @OptionGroup var buildOptions: BuildOptions
 
         @Option(name: .long, help: "Scheme to build")
         var scheme: String?
@@ -172,46 +199,70 @@ struct DiffCommand: AsyncParsableCommand {
 
             // Optionally capture first (with full lifecycle)
             if capture {
+                let resolvedBinary = try buildOptions.resolveAppBinary()
+                defer { resolvedBinary?.cleanup() }
+
+                let appBundleId = resolvedBinary.flatMap { AppBinaryResolver.bundleId(from: $0.appPath) }
+
                 let resolved = try await ResolvedProject.resolve(
-                    schemeFlag: scheme, simulatorFlag: simulator, bundleIdFlag: bundleId, config: config
+                    schemeFlag: scheme, simulatorFlag: simulator, bundleIdFlag: bundleId, config: config,
+                    skipBuild: buildOptions.shouldSkipBuild,
+                    appBundleId: appBundleId
                 )
 
                 guard !resolved.screens.isEmpty else {
                     throw GrantivaError.invalidArgument("No screens configured in grantiva.yml")
                 }
 
-                // Full lifecycle: boot → build → install → launch → capture
                 let device = try await simulatorManager.boot(nameOrUDID: resolved.simulator)
-                let destination = "platform=iOS Simulator,name=\(device.name)"
 
-                if !options.json {
-                    print("Building \(resolved.scheme)...")
-                }
+                if !buildOptions.shouldSkipInstall {
+                    let destination = "platform=iOS Simulator,name=\(device.name)"
+                    var productPath: String?
 
-                let buildResult = try await XcodeBuildRunner().build(
-                    scheme: resolved.scheme,
-                    workspace: resolved.workspace,
-                    project: resolved.project,
-                    destination: destination
-                )
-
-                guard buildResult.success else {
-                    if options.json {
-                        print(try JSONOutput.string(buildResult))
+                    if let resolvedBinary {
+                        if !options.json {
+                            print("Using pre-built binary: \(URL(fileURLWithPath: resolvedBinary.appPath).lastPathComponent)")
+                        }
+                        productPath = resolvedBinary.appPath
                     } else {
-                        print(TableFormatter().formatBuild(buildResult))
-                    }
-                    throw ExitCode.failure
-                }
+                        guard let buildScheme = resolved.scheme else {
+                            throw GrantivaError.invalidArgument(
+                                "No scheme specified. Pass --scheme, set it in grantiva.yml, or use --app-file to provide a pre-built binary."
+                            )
+                        }
 
-                if let bid = resolved.bundleId {
-                    if let productPath = buildResult.productPath {
-                        try await XcodeBuildRunner().install(
-                            bundleId: bid, productPath: productPath, udid: device.udid
+                        if !options.json {
+                            print("Building \(buildScheme)...")
+                        }
+
+                        let buildResult = try await XcodeBuildRunner().build(
+                            scheme: buildScheme,
+                            workspace: resolved.workspace,
+                            project: resolved.project,
+                            destination: destination
                         )
+
+                        guard buildResult.success else {
+                            if options.json {
+                                print(try JSONOutput.string(buildResult))
+                            } else {
+                                print(TableFormatter().formatBuild(buildResult))
+                            }
+                            throw ExitCode.failure
+                        }
+                        productPath = buildResult.productPath
                     }
-                    try await XcodeBuildRunner().launch(bundleId: bid, udid: device.udid)
-                    try await Task.sleep(for: .seconds(2))
+
+                    if let bid = resolved.bundleId {
+                        if let productPath {
+                            try await XcodeBuildRunner().install(
+                                bundleId: bid, productPath: productPath, udid: device.udid
+                            )
+                        }
+                        try await XcodeBuildRunner().launch(bundleId: bid, udid: device.udid)
+                        try await Task.sleep(for: .seconds(2))
+                    }
                 }
 
                 // Start driver (needed for screenshots on headless CI + navigation)
