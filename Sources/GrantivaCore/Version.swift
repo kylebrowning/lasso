@@ -1,1 +1,1 @@
-public let grantivaVersion = "0.4.4"
+public let grantivaVersion = "0.7.0"

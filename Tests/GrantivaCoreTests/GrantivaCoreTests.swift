@@ -159,7 +159,7 @@ final class GrantivaCoreTests: XCTestCase {
     // MARK: - GrantivaDefaults
 
     func testDefaultAPIBaseURL() {
-        XCTAssertEqual(GrantivaDefaults.apiBaseURL, "https://grantiva.io")
+        XCTAssertEqual(GrantivaDefaults.apiBaseURL, "https://api.grantiva.io")
     }
 
     // MARK: - ImageDiffer
