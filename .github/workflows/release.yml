@@ -20,54 +20,17 @@ jobs:
 
       - name: Verify and package binary
         run: |
-          BINARY=$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)/grantiva
+          BIN_DIR=$(swift build -c release --arch arm64 --arch x86_64 --show-bin-path)
+          BINARY="$BIN_DIR/grantiva"
+          BUNDLE="$BIN_DIR/grantiva_GrantivaCore.bundle"
           test -f "$BINARY" || { echo "Binary not found at $BINARY"; exit 1; }
+          test -d "$BUNDLE" || { echo "Resource bundle not found at $BUNDLE"; exit 1; }
           strip "$BINARY"
-          tar -czf "grantiva-${{ github.ref_name }}-macos.tar.gz" -C "$(dirname "$BINARY")" grantiva
-
-      - name: Build and package driver
-        run: |
-          # Pick the first available iOS Simulator device
-          SIM_NAME=$(xcrun simctl list devices available -j | python3 -c "
-          import sys, json
-          data = json.load(sys.stdin)
-          for runtime, devices in data['devices'].items():
-              if 'iOS' in runtime or 'iPhone' in runtime:
-                  for d in devices:
-                      if d.get('isAvailable', False):
-                          print(d['name'])
-                          sys.exit(0)
-          sys.exit(1)
-          ")
-          echo "Using simulator: $SIM_NAME"
-
-          xcodebuild build-for-testing \
-            -project Apps/GrantivaDriver/GrantivaDriver.xcodeproj \
-            -scheme GrantivaDriverUITests \
-            -destination "platform=iOS Simulator,name=$SIM_NAME"
-
-          XCTESTRUN=$(find ~/Library/Developer/Xcode/DerivedData -name "*.xctestrun" -path "*GrantivaDriver*" | head -1)
-          if [ -z "$XCTESTRUN" ]; then
-            echo "Error: .xctestrun file not found in DerivedData"
-            exit 1
-          fi
-          PRODUCTS_DIR=$(dirname "$XCTESTRUN")
-
-          STAGING=$(mktemp -d)
-          cp -R "$PRODUCTS_DIR" "$STAGING/Products"
-
-          XCODE_VERSION=$(xcodebuild -version | head -1 | awk '{print $2}')
-          XCODE_BUILD=$(xcodebuild -version | tail -1 | awk '{print $3}')
-          printf '{"xcodeVersion":"%s","xcodeBuildVersion":"%s","builtAt":"%s","grantivaVersion":"%s"}' \
-            "$XCODE_VERSION" "$XCODE_BUILD" "$(date -u +%Y-%m-%dT%H:%M:%SZ)" "${{ github.ref_name }}" \
-            > "$STAGING/driver-info.json"
-
-          tar -czf "grantiva-driver-${{ github.ref_name }}-macos.tar.gz" -C "$STAGING" Products driver-info.json
+          tar -czf "grantiva-${{ github.ref_name }}-macos.tar.gz" -C "$BIN_DIR" grantiva grantiva_GrantivaCore.bundle
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             grantiva-${{ github.ref_name }}-macos.tar.gz
-            grantiva-driver-${{ github.ref_name }}-macos.tar.gz
           generate_release_notes: true
