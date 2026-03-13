@@ -371,8 +371,17 @@ struct CICommand: AsyncParsableCommand {
                     throw ExitCode.failure
                 }
             } catch {
-                // If the run was started but failed, try to mark it as failed
+                // Mark run as failed on the backend so it doesn't stay in "running" forever
                 try? await client.appendLog(project, runId, "[grantiva] Run failed: \(error)")
+                let duration = Date().timeIntervalSince(start)
+                let failUpload = RunUpload(
+                    branch: branch,
+                    commitSHA: trimmedSHA,
+                    trigger: trigger,
+                    duration: duration,
+                    screens: []
+                )
+                try? await client.completeRun(project, runId, failUpload)
                 throw error
             }
         }

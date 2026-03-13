@@ -56,23 +56,43 @@ public enum RunnerSession {
         process.arguments = Array(args.dropFirst()) // drop the binary path
         process.currentDirectoryURL = URL(fileURLWithPath: runnerDir)
 
-        let stdoutPipe = Pipe()
+        // Stream stdout to stderr so CI sees runner progress in real time
+        // Capture stderr separately for error reporting
+        process.standardOutput = FileHandle.standardError
         let stderrPipe = Pipe()
-        process.standardOutput = stdoutPipe
         process.standardError = stderrPipe
 
         try process.run()
-        let stdoutData = stdoutPipe.fileHandleForReading.readDataToEndOfFile()
-        let stderrData = stderrPipe.fileHandleForReading.readDataToEndOfFile()
-        process.waitUntilExit()
 
-        let stdout = String(data: stdoutData, encoding: .utf8) ?? ""
+        // Read stderr in background to avoid pipe buffer deadlock
+        let stderrTask = Task<Data, Never> {
+            stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        }
+
+        // Timeout: kill the runner if it takes longer than 5 minutes
+        let timeoutSeconds: UInt64 = 300
+        let pid = process.processIdentifier
+        let timeoutTask = Task {
+            try await Task.sleep(nanoseconds: timeoutSeconds * 1_000_000_000)
+            if process.isRunning {
+                kill(pid, SIGTERM)
+            }
+        }
+
+        process.waitUntilExit()
+        timeoutTask.cancel()
+
+        let stderrData = await stderrTask.value
         let stderr = String(data: stderrData, encoding: .utf8) ?? ""
 
         guard process.terminationStatus == 0 else {
-            let output = stderr.isEmpty ? stdout : stderr
+            let output = stderr
+            let timedOut = process.terminationStatus == 15 // SIGTERM
+            let reason = timedOut
+                ? "Runner timed out after \(timeoutSeconds)s"
+                : "Runner failed (exit \(process.terminationStatus))"
             throw GrantivaError.commandFailed(
-                "Runner failed (exit \(process.terminationStatus)):\n\(output.suffix(2000))",
+                "\(reason):\n\(output.suffix(2000))",
                 process.terminationStatus
             )
         }
