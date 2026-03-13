@@ -10,7 +10,7 @@ public struct DoctorRunner: Sendable {
         checks.append(await checkXcode())
         checks.append(await checkXcodeVersion())
         checks.append(await checkBootedSimulator())
-        checks.append(await checkDriverCache())
+        checks.append(await checkRunner())
 
         // Project
         checks.append(checkGrantivaConfig())
@@ -65,30 +65,20 @@ public struct DoctorRunner: Sendable {
         }
     }
 
-    func checkDriverCache() async -> DoctorCheck {
-        let cache = DriverCache.live
-        if await cache.isValid() {
-            if let info = DriverCache.loadInfo() {
-                return DoctorCheck(
-                    name: "Driver Cache", status: .ok,
-                    message: "Cached for Xcode \(info.xcodeVersion) (\(info.xcodeBuildVersion))",
-                    fix: nil
-                )
-            }
-            return DoctorCheck(name: "Driver Cache", status: .ok, message: "Valid", fix: nil)
-        }
-
-        if DriverCache.loadInfo() != nil {
+    func checkRunner() async -> DoctorCheck {
+        let fm = FileManager.default
+        let runnerPath = RunnerManager.binaryPath
+        if fm.fileExists(atPath: runnerPath) {
             return DoctorCheck(
-                name: "Driver Cache", status: .warning,
-                message: "Stale — Xcode version changed since last build",
-                fix: "Run: grantiva driver build"
+                name: "Runner", status: .ok,
+                message: "grantiva-runner \(RunnerManager.runnerVersion)",
+                fix: nil
             )
         }
         return DoctorCheck(
-            name: "Driver Cache", status: .warning,
-            message: "Not built — UI automation requires the driver",
-            fix: "Run: grantiva driver build"
+            name: "Runner", status: .warning,
+            message: "Not extracted — will be extracted on first use",
+            fix: "Run: grantiva runner install"
         )
     }
 

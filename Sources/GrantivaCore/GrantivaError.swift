@@ -13,13 +13,12 @@ public enum GrantivaError: Error, LocalizedError, Sendable {
     case invalidArgument(String)
     case diffSizeMismatch(baseline: String, current: String)
     case noCaptures(String)
-    case driverCacheStale
+    case runnerNotFound
     case networkError(String, Int)
     case baselineNotFound(String)
     case appNotFound(String)
     case invalidBinary(String)
     case ipaExtractionFailed(String)
-    case driverNotRunning
 
     public var errorDescription: String? {
         switch self {
@@ -47,8 +46,8 @@ public enum GrantivaError: Error, LocalizedError, Sendable {
             return "Image size mismatch: baseline is \(baseline), current is \(current)"
         case .noCaptures(let dir):
             return "No captures found in \(dir). Run: grantiva diff capture"
-        case .driverCacheStale:
-            return "Driver cache is missing or stale. Run: grantiva driver build"
+        case .runnerNotFound:
+            return "Runner binary not found. The embedded grantiva-runner could not be extracted."
         case .networkError(let message, let statusCode):
             return "Network error (\(statusCode)): \(message)"
         case .baselineNotFound(let screen):
@@ -59,8 +58,6 @@ public enum GrantivaError: Error, LocalizedError, Sendable {
             return "Invalid app binary: \(reason)"
         case .ipaExtractionFailed(let reason):
             return "IPA extraction failed: \(reason)"
-        case .driverNotRunning:
-            return "Driver is not running. Start it first: grantiva driver start"
         }
     }
 }

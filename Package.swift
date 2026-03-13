@@ -27,6 +27,10 @@ let package = Package(
             dependencies: [
                 .product(name: "Logging", package: "swift-log"),
                 .product(name: "Yams", package: "Yams"),
+            ],
+            resources: [
+                .copy("Resources/grantiva-runner-arm64.tar.gz"),
+                .copy("Resources/grantiva-runner-amd64.tar.gz"),
             ]
         ),
         .target(name: "GrantivaAPI", dependencies: ["GrantivaCore"]),

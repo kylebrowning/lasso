@@ -119,22 +119,20 @@ struct DiffCommand: AsyncParsableCommand {
                 device = try await simulatorManager.bootedDevice()
             }
 
-            // Start driver (needed for screenshots on headless CI + navigation)
+            guard let bid = resolved.bundleId else {
+                throw GrantivaError.invalidArgument("Bundle ID is required for screen capture")
+            }
+
             if !options.json {
-                print("Starting driver...")
+                print("Capturing \(resolved.screens.count) screen(s)...")
             }
-            let session = try await DriverSession.start(
+
+            let captures = try await RunnerSession.run(
+                screens: resolved.screens,
+                bundleId: bid,
                 udid: device.udid,
-                bundleId: resolved.bundleId,
-                simulatorName: device.name,
-                port: options.driverPort
+                outputDir: outputDir
             )
-
-            defer {
-                Task { await session.stop() }
-            }
-
-            let captures = try await session.captureAll(resolved.screens, outputDir)
 
             // Print step-by-step results
             if !options.json {
@@ -265,26 +263,20 @@ struct DiffCommand: AsyncParsableCommand {
                     }
                 }
 
-                // Start driver (needed for screenshots on headless CI + navigation)
-                if !options.json {
-                    print("Starting driver...")
-                }
-                let session = try await DriverSession.start(
-                    udid: device.udid,
-                    bundleId: resolved.bundleId,
-                    simulatorName: device.name,
-                    port: options.driverPort
-                )
-
-                defer {
-                    Task { await session.stop() }
+                guard let bid = resolved.bundleId else {
+                    throw GrantivaError.invalidArgument("Bundle ID is required for screen capture")
                 }
 
                 if !options.json {
                     print("Capturing \(resolved.screens.count) screen(s)...")
                 }
 
-                let captures = try await session.captureAll(resolved.screens, captureDir)
+                let captures = try await RunnerSession.run(
+                    screens: resolved.screens,
+                    bundleId: bid,
+                    udid: device.udid,
+                    outputDir: captureDir
+                )
 
                 // Print step-by-step results
                 if !options.json {

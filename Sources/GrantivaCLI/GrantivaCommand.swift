@@ -12,7 +12,7 @@ public struct GrantivaCommand: AsyncParsableCommand {
             DiffCommand.self,
             AuthCommand.self,
             DoctorCommand.self,
-            DriverCommand.self,
+            RunnerCommand.self,
             InitCommand.self,
         ]
     )

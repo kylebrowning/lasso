@@ -31,7 +31,7 @@ struct CICommand: AsyncParsableCommand {
         var bundleId: String?
 
         var simulatorManager: SimulatorManager = .live
-        var driverCache: DriverCache = .live
+        var runnerManager: RunnerManager = .live
         var imageDiffer: ImageDiffer = .live
 
         /// Log a step to stderr and stream to the backend if a run is active.
@@ -104,14 +104,10 @@ struct CICommand: AsyncParsableCommand {
             }
 
             do {
-                // 0. Preflight: ensure driver is available before expensive build
-                let driverCacheValid = await driverCache.isValid()
-                rlog("Driver cache valid: \(driverCacheValid)")
-                if !driverCacheValid {
-                    rlog("Preparing driver cache...")
-                    try await driverCache.buildAndCache(resolved.simulator)
-                    rlog("Driver cache ready")
-                }
+                // 0. Preflight: ensure runner binary is extracted
+                rlog("Preparing runner...")
+                try await runnerManager.ensureAvailable()
+                rlog("Runner ready")
 
                 // 1. Boot → Build → Install → Launch → Capture
                 rlog("Booting simulator: \(resolved.simulator)")
@@ -166,24 +162,19 @@ struct CICommand: AsyncParsableCommand {
                     try await Task.sleep(for: .seconds(2))
                 }
 
-                // Start driver (needed for screenshots on headless CI + navigation)
-                rlog("Starting driver on port \(options.driverPort)...")
-                let session = try await DriverSession.start(
-                    udid: device.udid,
-                    bundleId: resolved.bundleId,
-                    simulatorName: device.name,
-                    port: options.driverPort,
-                    cache: driverCache
-                )
-                rlog("Driver healthy")
-
-                defer {
-                    Task { await session.stop() }
+                // Run the embedded runner for navigation + screenshots
+                guard let bid = resolved.bundleId else {
+                    throw GrantivaError.invalidArgument("Bundle ID is required for screen capture")
                 }
-
                 rlog("Capturing \(resolved.screens.count) screen(s)...")
 
-                let screenCaptures = try await session.captureAll(resolved.screens, captureDir)
+                let screenCaptures = try await RunnerSession.run(
+                    screens: resolved.screens,
+                    bundleId: bid,
+                    udid: device.udid,
+                    runner: runnerManager,
+                    outputDir: captureDir
+                )
                 rlog("Capture complete")
 
                 // Print step-by-step results (Maestro-style)
