@@ -3,7 +3,7 @@ import Foundation
 // MARK: - Defaults
 
 public enum GrantivaDefaults {
-    public static let apiBaseURL = "https://grantiva.io"
+    public static let apiBaseURL = "https://api.grantiva.io"
 }
 
 // MARK: - AuthCredentials
