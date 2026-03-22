@@ -105,11 +105,22 @@ extension RangeClient {
                 var request = URLRequest(url: url)
                 request.httpMethod = "POST"
                 request.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                let body = try JSONEncoder().encode([
-                    "branch": startReq.branch,
-                    "commit_sha": startReq.commitSHA ?? "",
-                    "trigger": startReq.trigger,
-                ])
+                struct StartRunBody: Encodable {
+                    let branch: String
+                    let commit_sha: String?
+                    let trigger: String
+                    let pr_number: Int?
+                    let repo_url: String?
+                    let ci_job_url: String?
+                }
+                let body = try JSONEncoder().encode(StartRunBody(
+                    branch: startReq.branch,
+                    commit_sha: startReq.commitSHA,
+                    trigger: startReq.trigger,
+                    pr_number: startReq.prNumber,
+                    repo_url: startReq.repoUrl,
+                    ci_job_url: startReq.ciJobUrl
+                ))
                 request.httpBody = body
                 let data = try await client.sendRequest(request)
                 return try JSONDecoder().decode(RunResponse.self, from: data)
@@ -159,6 +170,15 @@ private struct MultipartForm {
         body.appendField(boundary: boundary, name: "trigger", value: upload.trigger)
         if let duration = upload.duration {
             body.appendField(boundary: boundary, name: "duration", value: String(duration))
+        }
+        if let prNumber = upload.prNumber {
+            body.appendField(boundary: boundary, name: "pr_number", value: String(prNumber))
+        }
+        if let repoUrl = upload.repoUrl {
+            body.appendField(boundary: boundary, name: "repo_url", value: repoUrl)
+        }
+        if let ciJobUrl = upload.ciJobUrl {
+            body.appendField(boundary: boundary, name: "ci_job_url", value: ciJobUrl)
         }
 
         // Screens as indexed array of fields: screens[0][name], screens[0][status], etc.

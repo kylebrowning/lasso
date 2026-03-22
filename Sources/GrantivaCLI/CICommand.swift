@@ -91,9 +91,25 @@ struct CICommand: AsyncParsableCommand {
             // Determine trigger
             let trigger = ProcessInfo.processInfo.environment["CI"] != nil ? "ci" : "manual"
 
+            // Gather CI metadata from GitHub Actions environment variables
+            let env = ProcessInfo.processInfo.environment
+            let prNumber = env["GITHUB_PR_NUMBER"].flatMap { Int($0) }
+            let repoUrl: String? = env["GITHUB_REPOSITORY"].map { repo in
+                let server = env["GITHUB_SERVER_URL"] ?? "https://github.com"
+                return "\(server)/\(repo)"
+            }
+            let ciJobUrl: String? = {
+                guard let repo = env["GITHUB_REPOSITORY"],
+                      let runId = env["GITHUB_RUN_ID"]
+                else { return nil }
+                let server = env["GITHUB_SERVER_URL"] ?? "https://github.com"
+                return "\(server)/\(repo)/actions/runs/\(runId)"
+            }()
+
             // Start run immediately so it appears in the dashboard as "running"
             let startResponse = try await client.startRun(project, StartRunRequest(
-                branch: branch, commitSHA: trimmedSHA, trigger: trigger
+                branch: branch, commitSHA: trimmedSHA, trigger: trigger,
+                prNumber: prNumber, repoUrl: repoUrl, ciJobUrl: ciJobUrl
             ))
             let runId = startResponse.runId
             log("Run started: \(runId)", client: client, project: project, runId: runId)
@@ -303,7 +319,10 @@ struct CICommand: AsyncParsableCommand {
                     commitSHA: trimmedSHA,
                     trigger: trigger,
                     duration: duration,
-                    screens: screenUploads
+                    screens: screenUploads,
+                    prNumber: prNumber,
+                    repoUrl: repoUrl,
+                    ciJobUrl: ciJobUrl
                 )
 
                 rlog("Uploading results to \(credentials.baseURL)...")
@@ -379,7 +398,10 @@ struct CICommand: AsyncParsableCommand {
                     commitSHA: trimmedSHA,
                     trigger: trigger,
                     duration: duration,
-                    screens: []
+                    screens: [],
+                    prNumber: prNumber,
+                    repoUrl: repoUrl,
+                    ciJobUrl: ciJobUrl
                 )
                 try? await client.completeRun(project, runId, failUpload)
                 throw error

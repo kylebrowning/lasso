@@ -115,19 +115,28 @@ public struct RunUpload: Sendable {
     public let trigger: String
     public let duration: Double?
     public let screens: [RunScreenUpload]
+    public let prNumber: Int?
+    public let repoUrl: String?
+    public let ciJobUrl: String?
 
     public init(
         branch: String,
         commitSHA: String? = nil,
         trigger: String,
         duration: Double?,
-        screens: [RunScreenUpload]
+        screens: [RunScreenUpload],
+        prNumber: Int? = nil,
+        repoUrl: String? = nil,
+        ciJobUrl: String? = nil
     ) {
         self.branch = branch
         self.commitSHA = commitSHA
         self.trigger = trigger
         self.duration = duration
         self.screens = screens
+        self.prNumber = prNumber
+        self.repoUrl = repoUrl
+        self.ciJobUrl = ciJobUrl
     }
 }
 
@@ -135,11 +144,24 @@ public struct StartRunRequest: Sendable {
     public let branch: String
     public let commitSHA: String?
     public let trigger: String
+    public let prNumber: Int?
+    public let repoUrl: String?
+    public let ciJobUrl: String?
 
-    public init(branch: String, commitSHA: String?, trigger: String) {
+    public init(
+        branch: String,
+        commitSHA: String?,
+        trigger: String,
+        prNumber: Int? = nil,
+        repoUrl: String? = nil,
+        ciJobUrl: String? = nil
+    ) {
         self.branch = branch
         self.commitSHA = commitSHA
         self.trigger = trigger
+        self.prNumber = prNumber
+        self.repoUrl = repoUrl
+        self.ciJobUrl = ciJobUrl
     }
 }
 
