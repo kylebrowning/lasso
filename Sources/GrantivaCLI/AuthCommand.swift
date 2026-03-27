@@ -39,7 +39,7 @@ struct AuthCommand: AsyncParsableCommand {
         // MARK: - Direct API key flow (CI / headless)
 
         private func loginWithAPIKey(_ apiKey: String) async throws {
-            let meURL = URL(string: "\(baseURL)/auth/me")!
+            let meURL = URL(string: "\(baseURL)/api/v1/auth/me")!
             var request = URLRequest(url: meURL)
             request.httpMethod = "GET"
             request.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
