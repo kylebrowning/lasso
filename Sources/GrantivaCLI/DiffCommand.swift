@@ -467,7 +467,7 @@ struct DiffCommand: AsyncParsableCommand {
         if let credentials = AuthStore.resolveCredentials() {
             let client = RangeClient(apiKey: credentials.apiKey, baseURL: credentials.baseURL)
             let projectId = try await ProjectIdentifier.resolve()
-            return client.asBaselineStore(project: projectId.projectSlug, branch: projectId.currentBranch)
+            return client.asBaselineStore(project: projectId.projectSlug, branch: projectId.currentBranch, baseURL: credentials.baseURL)
         }
         return .local()
     }
