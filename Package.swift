@@ -12,14 +12,22 @@ let package = Package(
         .package(url: "https://github.com/apple/swift-argument-parser", from: "1.5.0"),
         .package(url: "https://github.com/apple/swift-log", from: "1.6.0"),
         .package(url: "https://github.com/jpsim/Yams", from: "5.3.0"),
+        .package(url: "https://github.com/modelcontextprotocol/swift-sdk", from: "0.11.0"),
     ],
     targets: [
         .executableTarget(name: "grantiva", dependencies: ["GrantivaCLI"]),
         .target(
             name: "GrantivaCLI",
             dependencies: [
-                "GrantivaCore", "GrantivaAPI",
+                "GrantivaCore", "GrantivaAPI", "GrantivaMCP",
                 .product(name: "ArgumentParser", package: "swift-argument-parser"),
+            ]
+        ),
+        .target(
+            name: "GrantivaMCP",
+            dependencies: [
+                "GrantivaCore",
+                .product(name: "MCP", package: "swift-sdk"),
             ]
         ),
         .target(

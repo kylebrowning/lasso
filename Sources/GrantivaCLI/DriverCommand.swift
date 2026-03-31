@@ -69,40 +69,6 @@ struct RunnerVersionCommand: AsyncParsableCommand {
     }
 }
 
-// MARK: - Session File
-
-/// Shared session state persisted to `.grantiva/session.json`.
-struct RunnerSessionInfo: Codable {
-    let pid: Int32
-    let wdaPort: UInt16
-    let bundleId: String
-    let udid: String
-    let startedAt: Date
-
-    static let path = ".grantiva/session.json"
-
-    func write() throws {
-        let dir = (Self.path as NSString).deletingLastPathComponent
-        try FileManager.default.createDirectory(atPath: dir, withIntermediateDirectories: true)
-        let data = try JSONEncoder().encode(self)
-        try data.write(to: URL(fileURLWithPath: Self.path))
-    }
-
-    static func load() throws -> RunnerSessionInfo {
-        let data = try Data(contentsOf: URL(fileURLWithPath: path))
-        return try JSONDecoder().decode(RunnerSessionInfo.self, from: data)
-    }
-
-    static func remove() {
-        try? FileManager.default.removeItem(atPath: path)
-    }
-
-    /// Check if the session process is still alive.
-    var isAlive: Bool {
-        kill(pid, 0) == 0
-    }
-}
-
 // MARK: - Start
 
 @available(macOS 15, *)
@@ -411,14 +377,14 @@ struct DumpHierarchyCommand: AsyncParsableCommand {
 
         case "json":
             // Parse XML to JSON
-            let parser = HierarchyXMLParser(xml: xmlSource)
+            let parser = WDAHierarchyXMLParser(xml: xmlSource)
             let tree = parser.parse()
             let jsonData = try JSONSerialization.data(withJSONObject: tree, options: [.prettyPrinted, .sortedKeys])
             print(String(data: jsonData, encoding: .utf8) ?? "{}")
 
         case "tree":
             // Parse XML and pretty-print as tree
-            let parser = HierarchyXMLParser(xml: xmlSource)
+            let parser = WDAHierarchyXMLParser(xml: xmlSource)
             let tree = parser.parse()
             printTree(element: tree, indent: 0)
 
@@ -463,70 +429,3 @@ struct DumpHierarchyCommand: AsyncParsableCommand {
     }
 }
 
-// MARK: - XML Parser for WDA Hierarchy
-
-/// Parses the XML page source from WebDriverAgent into a dictionary tree.
-class HierarchyXMLParser: NSObject, XMLParserDelegate {
-    private let xml: String
-    private var stack: [NSMutableDictionary] = []
-    private var root: [String: Any] = [:]
-
-    init(xml: String) {
-        self.xml = xml
-    }
-
-    func parse() -> [String: Any] {
-        guard let data = xml.data(using: .utf8) else { return [:] }
-        let parser = XMLParser(data: data)
-        parser.delegate = self
-        parser.parse()
-        return root
-    }
-
-    func parser(_ parser: XMLParser, didStartElement elementName: String,
-                namespaceURI: String?, qualifiedName: String?,
-                attributes: [String: String]) {
-        let node = NSMutableDictionary()
-        node["type"] = elementName
-
-        // Map WDA XML attributes to our format
-        if let label = attributes["label"], !label.isEmpty {
-            node["label"] = label
-        }
-        if let name = attributes["name"], !name.isEmpty {
-            node["name"] = name
-        }
-        if let identifier = attributes["identifier"], !identifier.isEmpty {
-            // WDA uses "name" for accessibilityIdentifier in some versions
-            node["identifier"] = identifier
-        }
-        if let value = attributes["value"], !value.isEmpty {
-            node["value"] = value
-        }
-        if let enabled = attributes["enabled"] {
-            node["enabled"] = enabled == "true"
-        }
-        if let visible = attributes["visible"] {
-            node["visible"] = visible == "true"
-        }
-        if let x = attributes["x"], let y = attributes["y"],
-           let w = attributes["width"], let h = attributes["height"] {
-            node["frame"] = ["x": x, "y": y, "width": w, "height": h]
-        }
-
-        node["children"] = NSMutableArray()
-
-        if let parent = stack.last {
-            (parent["children"] as? NSMutableArray)?.add(node)
-        }
-
-        stack.append(node)
-    }
-
-    func parser(_ parser: XMLParser, didEndElement elementName: String,
-                namespaceURI: String?, qualifiedName: String?) {
-        if let finished = stack.popLast(), stack.isEmpty {
-            root = finished as! [String: Any]
-        }
-    }
-}
