@@ -7,7 +7,8 @@ public struct XcodeBuildRunner: Sendable {
         scheme: String,
         workspace: String? = nil,
         project: String? = nil,
-        destination: String = "platform=iOS Simulator,name=iPhone 16"
+        destination: String = "platform=iOS Simulator,name=iPhone 16",
+        buildSettings: [String] = []
     ) async throws -> BuildResult {
         let start = Date()
         var args = ["xcodebuild", "-scheme", scheme]
@@ -17,6 +18,7 @@ public struct XcodeBuildRunner: Sendable {
             args += ["-project", project]
         }
         args += ["-destination", "\(destination)", "build"]
+        args += buildSettings
 
         let command = args.map { $0.contains(" ") ? "\"\($0)\"" : $0 }.joined(separator: " ")
 

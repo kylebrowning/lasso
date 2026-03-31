@@ -135,7 +135,8 @@ struct CICommand: AsyncParsableCommand {
                         scheme: buildScheme,
                         workspace: resolved.workspace,
                         project: resolved.project,
-                        destination: destination
+                        destination: destination,
+                        buildSettings: resolved.buildSettings
                     )
                     rlog("Build finished: success=\(buildResult.success) duration=\(String(format: "%.1fs", buildResult.duration))")
 

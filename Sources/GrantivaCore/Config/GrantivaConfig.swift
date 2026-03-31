@@ -7,6 +7,7 @@ public struct GrantivaConfig: Sendable, Codable {
     public var project: String?
     public var simulator: String?
     public var bundleId: String?
+    public var buildSettings: [String]?
     public var screens: [Screen]
     public var diff: DiffConfig
     public var a11y: A11yConfig
@@ -115,6 +116,7 @@ public struct GrantivaConfig: Sendable, Codable {
     enum CodingKeys: String, CodingKey {
         case scheme, workspace, project, simulator
         case bundleId = "bundle_id"
+        case buildSettings = "build_settings"
         case screens, diff, a11y, size, ai
     }
 
@@ -124,6 +126,7 @@ public struct GrantivaConfig: Sendable, Codable {
         project: String? = nil,
         simulator: String? = nil,
         bundleId: String? = nil,
+        buildSettings: [String]? = nil,
         screens: [Screen] = [],
         diff: DiffConfig = .init(),
         a11y: A11yConfig = .init(),
@@ -135,6 +138,7 @@ public struct GrantivaConfig: Sendable, Codable {
         self.project = project
         self.simulator = simulator
         self.bundleId = bundleId
+        self.buildSettings = buildSettings
         self.screens = screens
         self.diff = diff
         self.a11y = a11y
@@ -149,6 +153,7 @@ public struct GrantivaConfig: Sendable, Codable {
         project = try container.decodeIfPresent(String.self, forKey: .project)
         simulator = try container.decodeIfPresent(String.self, forKey: .simulator)
         bundleId = try container.decodeIfPresent(String.self, forKey: .bundleId)
+        buildSettings = try container.decodeIfPresent([String].self, forKey: .buildSettings)
         screens = try container.decodeIfPresent([Screen].self, forKey: .screens) ?? []
         diff = try container.decodeIfPresent(DiffConfig.self, forKey: .diff) ?? .init()
         a11y = try container.decodeIfPresent(A11yConfig.self, forKey: .a11y) ?? .init()

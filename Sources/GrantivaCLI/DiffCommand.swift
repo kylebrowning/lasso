@@ -86,7 +86,8 @@ struct DiffCommand: AsyncParsableCommand {
                         scheme: buildScheme,
                         workspace: resolved.workspace,
                         project: resolved.project,
-                        destination: destination
+                        destination: destination,
+                        buildSettings: resolved.buildSettings
                     )
 
                     guard buildResult.success else {
@@ -238,7 +239,8 @@ struct DiffCommand: AsyncParsableCommand {
                             scheme: buildScheme,
                             workspace: resolved.workspace,
                             project: resolved.project,
-                            destination: destination
+                            destination: destination,
+                            buildSettings: resolved.buildSettings
                         )
 
                         guard buildResult.success else {

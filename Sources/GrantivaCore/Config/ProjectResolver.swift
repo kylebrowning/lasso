@@ -7,6 +7,7 @@ public struct ResolvedProject: Sendable {
     public let project: String?
     public let workspace: String?
     public let bundleId: String?
+    public let buildSettings: [String]
     public let simulator: String
     public let screens: [GrantivaConfig.Screen]
     public let diff: GrantivaConfig.DiffConfig
@@ -19,6 +20,7 @@ public struct ResolvedProject: Sendable {
         project: String? = nil,
         workspace: String? = nil,
         bundleId: String? = nil,
+        buildSettings: [String] = [],
         simulator: String = "iPhone 16",
         screens: [GrantivaConfig.Screen] = [],
         diff: GrantivaConfig.DiffConfig = .init(),
@@ -30,6 +32,7 @@ public struct ResolvedProject: Sendable {
         self.project = project
         self.workspace = workspace
         self.bundleId = bundleId
+        self.buildSettings = buildSettings
         self.simulator = simulator
         self.screens = screens
         self.diff = diff
@@ -109,6 +112,7 @@ extension ResolvedProject {
             project: project,
             workspace: workspace,
             bundleId: bundleId,
+            buildSettings: config?.buildSettings ?? [],
             simulator: simulator,
             screens: config?.screens ?? [],
             diff: config?.diff ?? .init(),
