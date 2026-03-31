@@ -34,3 +34,38 @@ jobs:
           files: |
             grantiva-${{ github.ref_name }}-macos.tar.gz
           generate_release_notes: true
+
+      - name: Update Homebrew formula
+        run: |
+          SHA=$(shasum -a 256 "grantiva-${{ github.ref_name }}-macos.tar.gz" | awk '{print $1}')
+          VERSION="${{ github.ref_name }}"
+
+          git clone https://x-access-token:${{ secrets.HOMEBREW_TAP_TOKEN }}@github.com/grantiva/homebrew-tap.git /tmp/homebrew-tap
+          cd /tmp/homebrew-tap
+
+          cat > Formula/grantiva.rb << FORMULA
+          class Grantiva < Formula
+            desc "The CLI for iOS developers — visual regression testing, feature flags, and more"
+            homepage "https://grantiva.io"
+            url "https://github.com/grantiva/cli/releases/download/${VERSION}/grantiva-${VERSION}-macos.tar.gz"
+            sha256 "${SHA}"
+            version "${VERSION}"
+            license "MIT"
+
+            depends_on :macos
+
+            def install
+              bin.install "grantiva"
+            end
+
+            test do
+              assert_match "USAGE: grantiva", shell_output("#{bin}/grantiva --help 2>&1")
+            end
+          end
+          FORMULA
+
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add Formula/grantiva.rb
+          git commit -m "Update grantiva to ${VERSION}"
+          git push
