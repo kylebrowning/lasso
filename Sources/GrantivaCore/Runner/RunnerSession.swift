@@ -167,6 +167,15 @@ public enum RunnerSession {
         runner: RunnerManager = .live,
         outputDir: String = ".grantiva/captures"
     ) async throws -> [ScreenCapture] {
+        // Resolve relative paths against the working directory where the CLI was invoked,
+        // not the runner binary's temp directory.
+        let absoluteFlowPath: String
+        if flowPath.hasPrefix("/") {
+            absoluteFlowPath = flowPath
+        } else {
+            absoluteFlowPath = FileManager.default.currentDirectoryPath + "/" + flowPath
+        }
+
         try await runner.ensureAvailable()
 
         let runnerBin = runner.runnerPath()
@@ -195,7 +204,7 @@ public enum RunnerSession {
             "--output", reportDir,
             "--flatten",
             "--wait-for-idle-timeout", "0",
-            flowPath,
+            absoluteFlowPath,
         ]
 
         let process = Process()
