@@ -131,6 +131,7 @@ struct RunCommand: AsyncParsableCommand {
                 log("Running flow: \(flowPath)")
                 let flowCaptures = try await RunnerSession.runFlowFile(
                     at: flowPath,
+                    bundleId: bid,
                     udid: device.udid,
                     runner: runnerManager,
                     outputDir: captureDir

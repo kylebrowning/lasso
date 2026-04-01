@@ -163,6 +163,7 @@ public enum RunnerSession {
     /// Throws on runner failure the same as `run()`.
     public static func runFlowFile(
         at flowPath: String,
+        bundleId: String,
         udid: String,
         runner: RunnerManager = .live,
         outputDir: String = ".grantiva/captures"
@@ -180,6 +181,20 @@ public enum RunnerSession {
 
         let runnerBin = runner.runnerPath()
         let runnerDir = runner.runnerDir()
+
+        // Inject the resolved bundleId as appId into the flow YAML so the runner can
+        // launch the app even when flow files live in a subdirectory and don't have appId,
+        // or when grantiva.yml is not co-located with the flow file.
+        let originalContent = try String(contentsOfFile: absoluteFlowPath, encoding: .utf8)
+        let injectedContent = injectAppId(originalContent, bundleId: bundleId)
+        let originalFilename = URL(fileURLWithPath: absoluteFlowPath).lastPathComponent
+        let tempFlowDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("grantiva-\(UUID().uuidString)")
+            .path
+        try FileManager.default.createDirectory(atPath: tempFlowDir, withIntermediateDirectories: true)
+        let tempFlowPath = "\(tempFlowDir)/\(originalFilename)"
+        try injectedContent.write(toFile: tempFlowPath, atomically: true, encoding: .utf8)
+        defer { try? FileManager.default.removeItem(atPath: tempFlowDir) }
 
         let reportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("grantiva-report-\(UUID().uuidString)")
@@ -204,7 +219,7 @@ public enum RunnerSession {
             "--output", reportDir,
             "--flatten",
             "--wait-for-idle-timeout", "0",
-            absoluteFlowPath,
+            tempFlowPath,
         ]
 
         let process = Process()
@@ -288,6 +303,36 @@ public enum RunnerSession {
         }
 
         return captures
+    }
+
+    /// Injects or replaces the `appId` line in a Maestro flow YAML header.
+    /// Flow files in subdirectories may omit appId or have it set to the wrong value;
+    /// this ensures the runner always has the correct bundle ID for launchApp.
+    static func injectAppId(_ content: String, bundleId: String) -> String {
+        let lines = content.components(separatedBy: "\n")
+
+        // Find --- document separator (not at line 0)
+        var separatorIdx: Int?
+        for (i, line) in lines.enumerated() where i > 0 {
+            if line.trimmingCharacters(in: .whitespaces) == "---" {
+                separatorIdx = i
+                break
+            }
+        }
+
+        if let idx = separatorIdx {
+            var headerLines = Array(lines[0..<idx])
+            if let appIdIdx = headerLines.firstIndex(where: { $0.hasPrefix("appId:") }) {
+                headerLines[appIdIdx] = "appId: \(bundleId)"
+            } else {
+                headerLines.insert("appId: \(bundleId)", at: 0)
+            }
+            let bodyLines = Array(lines[idx...])
+            return (headerLines + bodyLines).joined(separator: "\n")
+        } else {
+            // No separator: prepend header and separator before the command list
+            return "appId: \(bundleId)\n---\n\(content)"
+        }
     }
 
     /// Build synthetic step results from the screen config.
