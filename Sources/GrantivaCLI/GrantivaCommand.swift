@@ -8,6 +8,7 @@ public struct GrantivaCommand: AsyncParsableCommand {
         abstract: "The Grantiva CLI for iOS developers.",
         version: grantivaVersion,
         subcommands: [
+            BuildCommand.self,
             CICommand.self,
             DiffCommand.self,
             AuthCommand.self,
