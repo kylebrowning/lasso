@@ -159,6 +159,127 @@ public enum RunnerSession {
         return captures
     }
 
+    /// Run a pre-existing Maestro YAML flow file directly, collecting any screenshots it takes.
+    /// Throws on runner failure the same as `run()`.
+    public static func runFlowFile(
+        at flowPath: String,
+        udid: String,
+        runner: RunnerManager = .live,
+        outputDir: String = ".grantiva/captures"
+    ) async throws -> [ScreenCapture] {
+        try await runner.ensureAvailable()
+
+        let runnerBin = runner.runnerPath()
+        let runnerDir = runner.runnerDir()
+
+        let reportDir = FileManager.default.temporaryDirectory
+            .appendingPathComponent("grantiva-report-\(UUID().uuidString)")
+            .path
+        try FileManager.default.createDirectory(atPath: reportDir, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(atPath: reportDir) }
+
+        _ = try? await shell(
+            "xcrun simctl status_bar \(udid) override --time 9:41 --batteryState charged --batteryLevel 100 --wifiBars 3 --cellularBars 4"
+        )
+        defer {
+            Task { _ = try? await shell("xcrun simctl status_bar \(udid) clear") }
+        }
+
+        let args = [
+            "--platform", "ios",
+            "--device", udid,
+            "--no-ansi",
+            "--no-app-install",
+            "test",
+            "--output", reportDir,
+            "--flatten",
+            "--wait-for-idle-timeout", "0",
+            flowPath,
+        ]
+
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: runnerBin)
+        process.arguments = Array(args.dropFirst())
+        process.currentDirectoryURL = URL(fileURLWithPath: runnerDir)
+        process.standardOutput = FileHandle.standardError
+        let stderrPipe = Pipe()
+        process.standardError = stderrPipe
+
+        try process.run()
+
+        let stderrTask = Task<Data, Never> {
+            stderrPipe.fileHandleForReading.readDataToEndOfFile()
+        }
+
+        let timeoutSeconds: UInt64 = 300
+        let pid = process.processIdentifier
+        let timeoutTask = Task {
+            try await Task.sleep(nanoseconds: timeoutSeconds * 1_000_000_000)
+            if process.isRunning { kill(pid, SIGTERM) }
+        }
+        process.waitUntilExit()
+        timeoutTask.cancel()
+
+        let stderrData = await stderrTask.value
+        let stderr = String(data: stderrData, encoding: .utf8) ?? ""
+
+        guard process.terminationStatus == 0 else {
+            let timedOut = process.terminationStatus == 15
+            let reason = timedOut
+                ? "Runner timed out after \(timeoutSeconds)s"
+                : "Runner failed (exit \(process.terminationStatus))"
+            throw GrantivaError.commandFailed(
+                "\(reason):\n\(stderr.suffix(2000))",
+                process.terminationStatus
+            )
+        }
+
+        // Collect screenshots from runner output
+        let fm = FileManager.default
+        if !fm.fileExists(atPath: outputDir) {
+            try fm.createDirectory(atPath: outputDir, withIntermediateDirectories: true)
+        }
+
+        let flowName = URL(fileURLWithPath: flowPath).deletingPathExtension().lastPathComponent
+        let assetsDir = "\(reportDir)/assets"
+        var captures: [ScreenCapture] = []
+
+        if fm.fileExists(atPath: assetsDir) {
+            let flowDirs = (try? fm.contentsOfDirectory(atPath: assetsDir)) ?? []
+            let screenshotDir = flowDirs.first.map { "\(assetsDir)/\($0)" } ?? assetsDir
+            let screenshotFiles = ((try? fm.contentsOfDirectory(atPath: screenshotDir)) ?? [])
+                .filter { $0.hasSuffix(".png") }
+                .sorted()
+
+            for file in screenshotFiles {
+                let screenshotName = "\(flowName)-\(URL(fileURLWithPath: file).deletingPathExtension().lastPathComponent)"
+                let srcPath = "\(screenshotDir)/\(file)"
+                let dstPath = "\(outputDir)/\(screenshotName).png"
+                if fm.fileExists(atPath: dstPath) { try fm.removeItem(atPath: dstPath) }
+                try fm.copyItem(atPath: srcPath, toPath: dstPath)
+                let data = try Data(contentsOf: URL(fileURLWithPath: dstPath))
+                captures.append(ScreenCapture(
+                    screenName: screenshotName,
+                    path: dstPath,
+                    sizeBytes: data.count,
+                    steps: [StepResult(action: "Run flow \"\(flowName)\"", status: .passed, duration: 0)]
+                ))
+            }
+        }
+
+        // If the flow ran but took no screenshots, still report it as passed
+        if captures.isEmpty {
+            captures.append(ScreenCapture(
+                screenName: flowName,
+                path: "",
+                sizeBytes: 0,
+                steps: [StepResult(action: "Run flow \"\(flowName)\"", status: .passed, duration: 0)]
+            ))
+        }
+
+        return captures
+    }
+
     /// Build synthetic step results from the screen config.
     private static func buildStepResults(for screen: GrantivaConfig.Screen) -> [StepResult] {
         switch screen.path {

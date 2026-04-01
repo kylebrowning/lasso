@@ -10,6 +10,7 @@ public struct ResolvedProject: Sendable {
     public let buildSettings: [String]
     public let simulator: String
     public let screens: [GrantivaConfig.Screen]
+    public let flows: [String]
     public let diff: GrantivaConfig.DiffConfig
     public let a11y: GrantivaConfig.A11yConfig
     public let size: GrantivaConfig.SizeConfig
@@ -23,6 +24,7 @@ public struct ResolvedProject: Sendable {
         buildSettings: [String] = [],
         simulator: String = "iPhone 16",
         screens: [GrantivaConfig.Screen] = [],
+        flows: [String] = [],
         diff: GrantivaConfig.DiffConfig = .init(),
         a11y: GrantivaConfig.A11yConfig = .init(),
         size: GrantivaConfig.SizeConfig = .init(),
@@ -35,6 +37,7 @@ public struct ResolvedProject: Sendable {
         self.buildSettings = buildSettings
         self.simulator = simulator
         self.screens = screens
+        self.flows = flows
         self.diff = diff
         self.a11y = a11y
         self.size = size
@@ -115,6 +118,7 @@ extension ResolvedProject {
             buildSettings: config?.buildSettings ?? [],
             simulator: simulator,
             screens: config?.screens ?? [],
+            flows: config?.flows ?? [],
             diff: config?.diff ?? .init(),
             a11y: config?.a11y ?? .init(),
             size: config?.size ?? .init(),

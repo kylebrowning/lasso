@@ -40,11 +40,11 @@ struct RunCommand: AsyncParsableCommand {
             appBundleId: appBundleId
         )
 
-        guard !resolved.screens.isEmpty else {
-            throw GrantivaError.invalidArgument("No screens configured in grantiva.yml")
+        guard !resolved.screens.isEmpty || !resolved.flows.isEmpty else {
+            throw GrantivaError.invalidArgument("No screens or flows configured in grantiva.yml")
         }
 
-        log("Resolved: scheme=\(resolved.scheme ?? "(none)") simulator=\(resolved.simulator) screens=\(resolved.screens.count)")
+        log("Resolved: scheme=\(resolved.scheme ?? "(none)") simulator=\(resolved.simulator) screens=\(resolved.screens.count) flows=\(resolved.flows.count)")
 
         // Prepare runner
         log("Preparing runner...")
@@ -111,17 +111,32 @@ struct RunCommand: AsyncParsableCommand {
         }
 
         // Run flows — capture screenshots, but skip VRT comparison
-        log("Running \(resolved.screens.count) flow(s)...")
+        let totalFlows = (resolved.screens.isEmpty ? 0 : 1) + resolved.flows.count
+        log("Running \(totalFlows) flow(s)...")
 
-        let captures: [ScreenCapture]
+        var captures: [ScreenCapture] = []
         do {
-            captures = try await RunnerSession.run(
-                screens: resolved.screens,
-                bundleId: bid,
-                udid: device.udid,
-                runner: runnerManager,
-                outputDir: captureDir
-            )
+            if !resolved.screens.isEmpty {
+                let screenCaptures = try await RunnerSession.run(
+                    screens: resolved.screens,
+                    bundleId: bid,
+                    udid: device.udid,
+                    runner: runnerManager,
+                    outputDir: captureDir
+                )
+                captures.append(contentsOf: screenCaptures)
+            }
+
+            for flowPath in resolved.flows {
+                log("Running flow: \(flowPath)")
+                let flowCaptures = try await RunnerSession.runFlowFile(
+                    at: flowPath,
+                    udid: device.udid,
+                    runner: runnerManager,
+                    outputDir: captureDir
+                )
+                captures.append(contentsOf: flowCaptures)
+            }
         } catch {
             // Runner failed — take a failure screenshot so the developer can see the current state
             let failurePath = "\(captureDir)/failure-\(Int(Date().timeIntervalSince1970)).png"

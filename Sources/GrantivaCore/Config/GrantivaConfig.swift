@@ -9,6 +9,8 @@ public struct GrantivaConfig: Sendable, Codable {
     public var bundleId: String?
     public var buildSettings: [String]?
     public var screens: [Screen]
+    /// Paths to external Maestro YAML flow files to run in addition to `screens`.
+    public var flows: [String]
     public var diff: DiffConfig
     public var a11y: A11yConfig
     public var size: SizeConfig
@@ -117,7 +119,7 @@ public struct GrantivaConfig: Sendable, Codable {
         case scheme, workspace, project, simulator
         case bundleId = "bundle_id"
         case buildSettings = "build_settings"
-        case screens, diff, a11y, size, ai
+        case screens, flows, diff, a11y, size, ai
     }
 
     public init(
@@ -128,6 +130,7 @@ public struct GrantivaConfig: Sendable, Codable {
         bundleId: String? = nil,
         buildSettings: [String]? = nil,
         screens: [Screen] = [],
+        flows: [String] = [],
         diff: DiffConfig = .init(),
         a11y: A11yConfig = .init(),
         size: SizeConfig = .init(),
@@ -140,6 +143,7 @@ public struct GrantivaConfig: Sendable, Codable {
         self.bundleId = bundleId
         self.buildSettings = buildSettings
         self.screens = screens
+        self.flows = flows
         self.diff = diff
         self.a11y = a11y
         self.size = size
@@ -155,6 +159,7 @@ public struct GrantivaConfig: Sendable, Codable {
         bundleId = try container.decodeIfPresent(String.self, forKey: .bundleId)
         buildSettings = try container.decodeIfPresent([String].self, forKey: .buildSettings)
         screens = try container.decodeIfPresent([Screen].self, forKey: .screens) ?? []
+        flows = try container.decodeIfPresent([String].self, forKey: .flows) ?? []
         diff = try container.decodeIfPresent(DiffConfig.self, forKey: .diff) ?? .init()
         a11y = try container.decodeIfPresent(A11yConfig.self, forKey: .a11y) ?? .init()
         size = try container.decodeIfPresent(SizeConfig.self, forKey: .size) ?? .init()
