@@ -186,6 +186,7 @@ public enum RunnerSession {
         }
 
         let args = [
+            runnerBin,
             "--platform", "ios",
             "--device", udid,
             "--no-ansi",
