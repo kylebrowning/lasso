@@ -86,6 +86,9 @@ struct RunnerStartCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Simulator name or UDID (reads from grantiva.yml if omitted)")
     var simulator: String?
 
+    @Flag(name: .long, help: "Detach the runner process from this terminal. Prints the log file path on start.")
+    var detach: Bool = false
+
     func run() async throws {
         // Check for existing session
         if let existing = try? RunnerSessionInfo.load(), existing.isAlive {
@@ -142,10 +145,7 @@ struct RunnerStartCommand: AsyncParsableCommand {
         let flowPath = tempDir.appendingPathComponent("session-flow.yaml").path
         try flowYaml.write(toFile: flowPath, atomically: true, encoding: .utf8)
 
-        // Start the runner as a background process
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: runnerBin)
-        process.arguments = [
+        let runnerArgs = [
             "--platform", "ios",
             "--device", device.udid,
             "--no-ansi",
@@ -154,9 +154,114 @@ struct RunnerStartCommand: AsyncParsableCommand {
             "--wait-for-idle-timeout", "0",
             flowPath,
         ]
+
+        if detach {
+            try await startDetached(
+                runnerBin: runnerBin,
+                runnerDir: runnerDir,
+                runnerArgs: runnerArgs,
+                resolvedBundleId: resolvedBundleId,
+                device: device
+            )
+        } else {
+            try await startForeground(
+                runnerBin: runnerBin,
+                runnerDir: runnerDir,
+                runnerArgs: runnerArgs,
+                resolvedBundleId: resolvedBundleId,
+                device: device
+            )
+        }
+    }
+
+    // MARK: - Detached start
+
+    private func startDetached(
+        runnerBin: String,
+        runnerDir: String,
+        runnerArgs: [String],
+        resolvedBundleId: String,
+        device: SimulatorDevice
+    ) async throws {
+        let logPath = FileManager.default.temporaryDirectory
+            .appendingPathComponent("grantiva-runner-\(Int(Date().timeIntervalSince1970)).log")
+            .path
+        let pidFile = logPath + ".pid"
+
+        // Shell-quote a single argument
+        func sq(_ s: String) -> String {
+            "'\(s.replacingOccurrences(of: "'", with: "'\\''"))'"
+        }
+
+        let cmdParts = ([runnerBin] + runnerArgs).map(sq).joined(separator: " ")
+        let shellCmd = "cd \(sq(runnerDir)) && nohup \(cmdParts) >> \(sq(logPath)) 2>&1 & echo $! > \(sq(pidFile))"
+
+        let sh = Process()
+        sh.executableURL = URL(fileURLWithPath: "/bin/sh")
+        sh.arguments = ["-c", shellCmd]
+        sh.standardOutput = FileHandle.nullDevice
+        sh.standardError = FileHandle.nullDevice
+        try sh.run()
+        sh.waitUntilExit()
+
+        let pidStr = (try? String(contentsOfFile: pidFile, encoding: .utf8))?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let runnerPid = Int32(pidStr) ?? -1
+
+        // Poll the log file for WDA port
+        let port = try await waitForWDAPort(logFile: logPath, timeout: 60)
+
+        guard let port else {
+            if runnerPid > 0 { kill(runnerPid, SIGTERM) }
+            throw GrantivaError.commandFailed(
+                "Timed out waiting for WDA to start. Log: \(logPath)", 1
+            )
+        }
+
+        let session = RunnerSessionInfo(
+            pid: runnerPid,
+            wdaPort: port,
+            bundleId: resolvedBundleId,
+            udid: device.udid,
+            startedAt: Date()
+        )
+        try session.write()
+
+        if options.json {
+            print(try JSONOutput.string([
+                "status": "started",
+                "port": "\(port)",
+                "pid": "\(runnerPid)",
+                "bundle_id": resolvedBundleId,
+                "udid": device.udid,
+                "log": logPath,
+            ]))
+        } else {
+            print("Runner started (detached)")
+            print("  WDA port: \(port)")
+            print("  PID:      \(runnerPid)")
+            print("  Log:      \(logPath)")
+            print("  Session:  \(RunnerSessionInfo.path)")
+            print("")
+            print("Tail the log with: tail -f \(logPath)")
+            print("Use 'grantiva runner stop' to stop the session.")
+        }
+    }
+
+    // MARK: - Foreground start
+
+    private func startForeground(
+        runnerBin: String,
+        runnerDir: String,
+        runnerArgs: [String],
+        resolvedBundleId: String,
+        device: SimulatorDevice
+    ) async throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: runnerBin)
+        process.arguments = runnerArgs
         process.currentDirectoryURL = URL(fileURLWithPath: runnerDir)
 
-        // Capture stdout to parse WDA port
         let stdoutPipe = Pipe()
         let stderrPipe = Pipe()
         process.standardOutput = stdoutPipe
@@ -164,51 +269,25 @@ struct RunnerStartCommand: AsyncParsableCommand {
 
         try process.run()
 
-        // Monitor output for WDA port
-        var wdaPort: UInt16?
-        let deadline = Date().addingTimeInterval(60) // 60s timeout for WDA startup
-
-        // Read output in a background task
+        let deadline = Date().addingTimeInterval(60)
         let outputTask = Task<UInt16?, Never> {
             let handle = stdoutPipe.fileHandleForReading
             var accumulated = ""
-
             while Date() < deadline {
                 let available = handle.availableData
                 guard !available.isEmpty else {
-                    try? await Task.sleep(nanoseconds: 100_000_000) // 100ms
+                    try? await Task.sleep(nanoseconds: 100_000_000)
                     continue
                 }
                 if let chunk = String(data: available, encoding: .utf8) {
                     accumulated += chunk
-
-                    // Look for WDA port in output (e.g., "WebDriverAgent started on port 8430")
-                    // The runner logs the port in various formats, try common patterns
-                    let patterns = [
-                        "port[: ]+([0-9]+)",
-                        "localhost:([0-9]+)",
-                        "WDA.*?([0-9]{4,5})",
-                    ]
-                    for pattern in patterns {
-                        if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
-                           let match = regex.firstMatch(in: accumulated, range: NSRange(accumulated.startIndex..., in: accumulated)),
-                           let range = Range(match.range(at: 1), in: accumulated) {
-                            let portStr = String(accumulated[range])
-                            if let p = UInt16(portStr), p > 1024 {
-                                return p
-                            }
-                        }
-                    }
-
-                    // Also check if launchApp completed (WDA is definitely up)
+                    if let p = extractWDAPort(from: accumulated) { return p }
                     if accumulated.contains("launchApp") && accumulated.contains("✓") {
-                        // WDA is up but we didn't catch the port — try common WDA port
-                        // Try to connect to discover it
-                        for candidatePort: UInt16 in [8430, 8100, 8200] {
-                            let testUrl = URL(string: "http://localhost:\(candidatePort)/status")!
-                            if let (_, resp) = try? await URLSession.shared.data(from: testUrl),
-                               let httpResp = resp as? HTTPURLResponse, httpResp.statusCode == 200 {
-                                return candidatePort
+                        for candidate: UInt16 in [8430, 8100, 8200] {
+                            let url = URL(string: "http://localhost:\(candidate)/status")!
+                            if let (_, resp) = try? await URLSession.shared.data(from: url),
+                               let http = resp as? HTTPURLResponse, http.statusCode == 200 {
+                                return candidate
                             }
                         }
                     }
@@ -217,15 +296,12 @@ struct RunnerStartCommand: AsyncParsableCommand {
             return nil
         }
 
-        wdaPort = await outputTask.value
-
-        guard let port = wdaPort else {
+        guard let port = await outputTask.value else {
             process.terminate()
             RunnerSessionInfo.remove()
             throw GrantivaError.commandFailed("Timed out waiting for WDA to start", 1)
         }
 
-        // Write session file
         let session = RunnerSessionInfo(
             pid: process.processIdentifier,
             wdaPort: port,
@@ -246,12 +322,48 @@ struct RunnerStartCommand: AsyncParsableCommand {
         } else {
             print("Runner started")
             print("  WDA port: \(port)")
-            print("  PID: \(process.processIdentifier)")
-            print("  Session: \(RunnerSessionInfo.path)")
+            print("  PID:      \(process.processIdentifier)")
+            print("  Session:  \(RunnerSessionInfo.path)")
             print("")
             print("Use 'grantiva runner dump-hierarchy' to inspect the view hierarchy.")
             print("Use 'grantiva runner stop' to stop the session.")
         }
+    }
+
+    // MARK: - Helpers
+
+    /// Poll a log file until a WDA port appears or the timeout elapses.
+    private func waitForWDAPort(logFile: String, timeout: TimeInterval) async throws -> UInt16? {
+        let deadline = Date().addingTimeInterval(timeout)
+        while Date() < deadline {
+            try await Task.sleep(nanoseconds: 500_000_000) // 500ms
+            guard let content = try? String(contentsOfFile: logFile, encoding: .utf8) else { continue }
+            if let p = extractWDAPort(from: content) { return p }
+            if content.contains("launchApp") && content.contains("✓") {
+                for candidate: UInt16 in [8430, 8100, 8200] {
+                    let url = URL(string: "http://localhost:\(candidate)/status")!
+                    if let (_, resp) = try? await URLSession.shared.data(from: url),
+                       let http = resp as? HTTPURLResponse, http.statusCode == 200 {
+                        return candidate
+                    }
+                }
+            }
+        }
+        return nil
+    }
+
+    /// Extract a WDA port number from a string of runner output.
+    private func extractWDAPort(from text: String) -> UInt16? {
+        let patterns = ["port[: ]+([0-9]+)", "localhost:([0-9]+)", "WDA.*?([0-9]{4,5})"]
+        for pattern in patterns {
+            if let regex = try? NSRegularExpression(pattern: pattern, options: .caseInsensitive),
+               let match = regex.firstMatch(in: text, range: NSRange(text.startIndex..., in: text)),
+               let range = Range(match.range(at: 1), in: text),
+               let p = UInt16(text[range]), p > 1024 {
+                return p
+            }
+        }
+        return nil
     }
 }
 
