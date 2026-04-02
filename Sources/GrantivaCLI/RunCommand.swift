@@ -20,6 +20,9 @@ struct RunCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Bundle identifier")
     var bundleId: String?
 
+    @Option(name: .long, help: "Run a single flow file instead of all configured flows")
+    var flow: String?
+
     var simulatorManager: SimulatorManager = .live
     var runnerManager: RunnerManager = .live
 
@@ -34,11 +37,25 @@ struct RunCommand: AsyncParsableCommand {
         let appBundleId = resolvedBinary.flatMap { AppBinaryResolver.bundleId(from: $0.appPath) }
 
         // Resolve project
-        let resolved = try await ResolvedProject.resolve(
+        var resolved = try await ResolvedProject.resolve(
             schemeFlag: scheme, simulatorFlag: simulator, bundleIdFlag: bundleId, config: config,
             skipBuild: buildOptions.shouldSkipBuild,
             appBundleId: appBundleId
         )
+
+        // --flow overrides configured flows and skips screens
+        if let flow {
+            resolved = ResolvedProject(
+                scheme: resolved.scheme,
+                project: resolved.project,
+                workspace: resolved.workspace,
+                bundleId: resolved.bundleId,
+                buildSettings: resolved.buildSettings,
+                simulator: resolved.simulator,
+                screens: [],
+                flows: [flow]
+            )
+        }
 
         guard !resolved.screens.isEmpty || !resolved.flows.isEmpty else {
             throw GrantivaError.invalidArgument("No screens or flows configured in grantiva.yml")
