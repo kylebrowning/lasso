@@ -55,7 +55,8 @@ jobs:
             depends_on :macos
 
             def install
-              bin.install "grantiva"
+              libexec.install "grantiva", "grantiva_GrantivaCore.bundle"
+              bin.install_symlink libexec/"grantiva"
             end
 
             test do
