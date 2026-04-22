@@ -60,7 +60,7 @@ struct DiffCommand: AsyncParsableCommand {
                 // Full lifecycle: boot → build → install → launch → capture
                 // OR: boot → install pre-built → launch → capture
                 device = try await simulatorManager.boot(nameOrUDID: resolved.simulator)
-                let destination = "platform=iOS Simulator,name=\(device.name)"
+                let destination = "platform=iOS Simulator,id=\(device.udid)"
 
                 var productPath: String?
 
@@ -216,7 +216,7 @@ struct DiffCommand: AsyncParsableCommand {
                 let device = try await simulatorManager.boot(nameOrUDID: resolved.simulator)
 
                 if !buildOptions.shouldSkipInstall {
-                    let destination = "platform=iOS Simulator,name=\(device.name)"
+                    let destination = "platform=iOS Simulator,id=\(device.udid)"
                     var productPath: String?
 
                     if let resolvedBinary {

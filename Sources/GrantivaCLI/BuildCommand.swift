@@ -45,7 +45,7 @@ struct BuildOnlyCommand: AsyncParsableCommand {
         }
 
         let device = try await SimulatorManager.live.boot(nameOrUDID: resolved.simulator)
-        let destination = "platform=iOS Simulator,name=\(device.name)"
+        let destination = "platform=iOS Simulator,id=\(device.udid)"
 
         if !options.json {
             print("[grantiva] Building \(buildScheme) for \(device.name)...")
@@ -109,7 +109,7 @@ struct InstallCommand: AsyncParsableCommand {
         )
 
         let device = try await SimulatorManager.live.boot(nameOrUDID: resolved.simulator)
-        let destination = "platform=iOS Simulator,name=\(device.name)"
+        let destination = "platform=iOS Simulator,id=\(device.udid)"
 
         var productPath: String?
 

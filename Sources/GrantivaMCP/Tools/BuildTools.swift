@@ -83,7 +83,7 @@ enum BuildTools {
 
         let simName = arguments["simulator"]?.stringValue ?? config?.simulator ?? "iPhone 16"
         let device = try await simManager.boot(nameOrUDID: simName)
-        let destination = "platform=iOS Simulator,name=\(device.name)"
+        let destination = "platform=iOS Simulator,id=\(device.udid)"
 
         let result = try await runner.build(
             scheme: scheme,
@@ -130,7 +130,7 @@ enum BuildTools {
 
         let simName = arguments["simulator"]?.stringValue ?? config?.simulator ?? "iPhone 16"
         let device = try await simManager.boot(nameOrUDID: simName)
-        let destination = "platform=iOS Simulator,name=\(device.name)"
+        let destination = "platform=iOS Simulator,id=\(device.udid)"
 
         let buildResult = try await runner.build(
             scheme: scheme,
@@ -179,7 +179,7 @@ enum BuildTools {
 
         let simName = arguments["simulator"]?.stringValue ?? config?.simulator ?? "iPhone 16"
         let device = try await simManager.boot(nameOrUDID: simName)
-        let destination = "platform=iOS Simulator,name=\(device.name)"
+        let destination = "platform=iOS Simulator,id=\(device.udid)"
 
         let result = try await runner.test(
             scheme: scheme,

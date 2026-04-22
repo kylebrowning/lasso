@@ -113,7 +113,7 @@ struct CICommand: AsyncParsableCommand {
                 rlog("Booting simulator: \(resolved.simulator)")
                 let device = try await simulatorManager.boot(nameOrUDID: resolved.simulator)
                 rlog("Simulator booted: \(device.name) (\(device.udid))")
-                let destination = "platform=iOS Simulator,name=\(device.name)"
+                let destination = "platform=iOS Simulator,id=\(device.udid)"
 
                 var productPath: String?
 

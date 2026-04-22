@@ -7,7 +7,7 @@ public struct XcodeBuildRunner: Sendable {
         scheme: String,
         workspace: String? = nil,
         project: String? = nil,
-        destination: String = "platform=iOS Simulator,name=iPhone 16",
+        destination: String,
         buildSettings: [String] = []
     ) async throws -> BuildResult {
         let start = Date()
@@ -69,7 +69,7 @@ public struct XcodeBuildRunner: Sendable {
         scheme: String,
         workspace: String? = nil,
         project: String? = nil,
-        destination: String = "platform=iOS Simulator,name=iPhone 16"
+        destination: String
     ) async throws -> TestResult {
         let start = Date()
         var args = ["xcodebuild", "-scheme", scheme]
