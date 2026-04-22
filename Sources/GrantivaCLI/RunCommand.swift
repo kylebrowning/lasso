@@ -115,17 +115,15 @@ struct RunCommand: AsyncParsableCommand {
             throw GrantivaError.invalidArgument("Bundle ID is required to run flows")
         }
 
-        if !buildOptions.shouldSkipInstall {
-            if let productPath {
-                log("Installing \(bid)...")
-                try await XcodeBuildRunner().install(
-                    bundleId: bid, productPath: productPath, udid: device.udid
-                )
-            }
-            log("Launching \(bid)...")
-            try await XcodeBuildRunner().launch(bundleId: bid, udid: device.udid)
-            try await Task.sleep(for: .seconds(2))
+        if !buildOptions.shouldSkipInstall, let productPath {
+            log("Installing \(bid)...")
+            try await XcodeBuildRunner().install(
+                bundleId: bid, productPath: productPath, udid: device.udid
+            )
         }
+        // Do not pre-launch: flows drive the app themselves via launchApp/clearState.
+        // A grantiva-side launch creates a process WDA can't control, causing stopApp
+        // and other lifecycle steps to fail.
 
         // Run flows — capture screenshots, but skip VRT comparison
         let totalFlows = (resolved.screens.isEmpty ? 0 : 1) + resolved.flows.count
