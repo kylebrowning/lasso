@@ -11,6 +11,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Verify runner version matches embedded tarball
+        run: |
+          set -euo pipefail
+          tarball="Sources/GrantivaCore/Resources/grantiva-runner-arm64.tar.gz"
+          expected=$(grep -Eo 'runnerVersion\s*=\s*"[^"]+"' \
+            Sources/GrantivaCore/Runner/RunnerManager.swift \
+            | sed -E 's/.*"([^"]+)".*/\1/')
+          stage=$(mktemp -d)
+          tar -xzf "$tarball" -C "$stage"
+          actual=$("$stage/grantiva-runner" --version | head -n1 | awk '{print $2}')
+          if [ "$expected" != "$actual" ]; then
+            echo "::error::RunnerManager.runnerVersion is \"$expected\" but"
+            echo "::error::embedded tarball binary reports \"$actual\"."
+            echo "::error::Bump RunnerManager.runnerVersion (or rebuild the runner tarball)"
+            echo "::error::so the CLI forces re-extraction on upgrade."
+            exit 1
+          fi
+          echo "Runner version matches: $actual"
+
       - name: Build
         run: swift build
 
