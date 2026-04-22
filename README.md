@@ -2,7 +2,7 @@
 
 The command-line tool for [Grantiva](https://grantiva.io) — the all-in-one platform for iOS developers.
 
-Currently features visual regression testing. Captures screenshots of your app's screens, diffs them against approved baselines, and posts the results as GitHub Check Runs. Catch visual regressions before they ship.
+Currently features visual regression testing and agent-native UI automation. Captures screenshots of your app's screens, diffs them against approved baselines, and posts the results as GitHub Check Runs. Also streams UI hierarchy and app logs so AI agents can read, diagnose, and self-heal broken flows. Catch visual regressions before they ship — and let your agents fix them.
 
 ## Install
 
@@ -32,13 +32,16 @@ grantiva doctor
 # Generate config
 grantiva init
 
-# Build the XCUITest driver (once per Xcode version)
-grantiva driver build
+# Extract the embedded runner (once per install)
+grantiva runner install
 
-# Authenticate with Grantiva
+# Run Maestro flows against your simulator
+grantiva run --flow flows/onboarding.yaml
+
+# Authenticate with Grantiva for baseline storage + CI integration
 grantiva auth login
 
-# Run the full CI pipeline
+# Run the full visual regression pipeline
 grantiva ci run
 ```
 
@@ -48,12 +51,30 @@ grantiva ci run
 2. **Build** — builds the app with `xcodebuild` (or skip with `--app-file` / `--no-build`)
 3. **Launch** — installs and launches the app
 4. **Navigate** — taps and swipes to each screen defined in `grantiva.yml`
-5. **Capture** — screenshots each screen via the XCUITest driver
+5. **Capture** — screenshots each screen via GrantivaAgent
 6. **Diff** — compares against baselines (pixel + CIE76 perceptual color distance)
 7. **Upload** — sends results to [Grantiva](https://grantiva.io)
 8. **Check Run** — posts a GitHub Check Run with before/after diffs
 
-All UI automation runs through a built-in XCUITest driver. No Accessibility permission needed. Works headless on CI out of the box.
+All UI automation runs through **GrantivaAgent** — a WebDriverAgent embedded in the CLI. No Accessibility permission needed, no Appium server, no Maestro install. Works headless on CI out of the box.
+
+## Agent-Native Features
+
+Grantiva is designed so AI agents can read, drive, and heal flows programmatically — not just by firing commands blind.
+
+```bash
+# Run a flow, keep the WDA session alive past completion, and stream app logs:
+grantiva run --flow flows/onboarding.yaml --keep-alive --logs
+
+# From another terminal (or a background task on CI), dump the live hierarchy:
+grantiva hierarchy > state.xml
+```
+
+- **`--keep-alive`** — Holds the GrantivaAgent session open after flows complete. The app stays frozen in whatever state the flow left it. Ctrl-C to release.
+- **`grantiva hierarchy`** — Reads the current UI accessibility tree of the running app via the held session. Pure read, no relaunch, no state loss. XML (default) or JSON.
+- **`--logs`** — Streams simulator app logs (`xcrun simctl spawn log stream`) prefixed with `[log]` interleaved with the flow output. Auto-scopes the predicate to your app's bundle ID.
+- **`--logs-predicate '<NSPredicate>'`** — Custom log filter for narrowing to specific subsystems, categories, or processes.
+- **`--flow <path>`** — Override configured flows to run a single YAML file. Useful for iterating on one test at a time.
 
 ## Configuration
 
@@ -192,6 +213,10 @@ Results upload to the [Grantiva](https://grantiva.io) dashboard and post as GitH
 ## Commands
 
 ```
+grantiva run                Run Maestro flows against a simulator (supports --keep-alive, --logs, --flow)
+grantiva hierarchy          Dump the live UI hierarchy of a keep-alive session
+grantiva build              Build the app via xcodebuild for a simulator
+grantiva install            Build, install, and launch the app
 grantiva ci run             Run full CI pipeline (build -> capture -> diff -> upload)
 grantiva diff capture       Capture screenshots for all configured screens
 grantiva diff compare       Diff captures against baselines
@@ -200,9 +225,11 @@ grantiva auth login         Authenticate with Grantiva
 grantiva auth status        Show current authentication
 grantiva auth logout        Remove stored credentials
 grantiva doctor             Check environment and dependencies
-grantiva driver build       Build and cache the XCUITest driver
-grantiva driver start       Start the driver server
-grantiva driver stop        Stop the driver server
+grantiva runner install     Extract the embedded GrantivaAgent runner
+grantiva runner version     Show the embedded runner version
+grantiva runner start       Start an interactive GrantivaAgent session
+grantiva runner stop        Stop a running interactive session
+grantiva mcp                Start the MCP server for AI agent integration
 grantiva init               Generate grantiva.yml
 ```
 
