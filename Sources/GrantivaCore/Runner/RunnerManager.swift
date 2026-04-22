@@ -20,7 +20,7 @@ public struct RunnerManager: Sendable, Decodable {
 }
 
 extension RunnerManager {
-    public static let runnerVersion = "1.0.9"
+    public static let runnerVersion = "1.1.12"
 
     static let baseDir: String = {
         let home = FileManager.default.homeDirectoryForCurrentUser.path
