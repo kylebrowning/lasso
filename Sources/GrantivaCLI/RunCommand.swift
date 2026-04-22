@@ -26,6 +26,15 @@ struct RunCommand: AsyncParsableCommand {
     @Flag(name: .long, help: "Keep GrantivaAgent session alive after flows complete so `grantiva hierarchy` can inspect UI state without relaunching the app. Release with Ctrl-C.")
     var keepAlive: Bool = false
 
+    @Flag(name: .long, help: "Stream simulator app logs into this terminal, prefixed with [log]. Filter defaults to lines whose subsystem or process matches the app's bundle ID.")
+    var logs: Bool = false
+
+    @Option(name: .long, help: "Custom NSPredicate for `simctl log stream --predicate`. Implies --logs.")
+    var logsPredicate: String?
+
+    @Option(name: .long, help: "Log level for --logs: default, info, debug. Defaults to `default` (warnings/errors/default).")
+    var logsLevel: String?
+
     var simulatorManager: SimulatorManager = .live
     var runnerManager: RunnerManager = .live
 
@@ -76,6 +85,34 @@ struct RunCommand: AsyncParsableCommand {
         let device = try await simulatorManager.boot(nameOrUDID: resolved.simulator)
         log("Simulator booted: \(device.name) (\(device.udid))")
         let destination = "platform=iOS Simulator,id=\(device.udid)"
+
+        // Optional simulator log streaming. Started after boot so `simctl spawn`
+        // has a running sim to attach to; stopped by defer so it shuts down on
+        // any exit path (success, failure, Ctrl-C).
+        let logStreamer: LogStreamer?
+        if logs || logsPredicate != nil {
+            let predicate: String?
+            if let explicit = logsPredicate {
+                predicate = explicit
+            } else if let bundle = resolved.bundleId ?? appBundleId {
+                predicate = defaultLogPredicate(forBundleID: bundle)
+            } else {
+                log("--logs requested but no bundle ID resolved; streaming without a predicate (very chatty).")
+                predicate = nil
+            }
+            let streamer = LogStreamer()
+            do {
+                try streamer.start(udid: device.udid, predicate: predicate, level: logsLevel)
+                log("Streaming simulator logs\(predicate.map { " (predicate: \($0))" } ?? "")")
+                logStreamer = streamer
+            } catch {
+                log("Warning: failed to start log stream: \(error)")
+                logStreamer = nil
+            }
+        } else {
+            logStreamer = nil
+        }
+        defer { logStreamer?.stop() }
 
         // Build / install / launch
         var productPath: String?
