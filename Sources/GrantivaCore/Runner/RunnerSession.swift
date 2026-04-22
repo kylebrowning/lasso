@@ -10,7 +10,8 @@ public enum RunnerSession {
         udid: String,
         runner: RunnerManager = .live,
         outputDir: String = ".grantiva/captures",
-        appFile: String? = nil
+        appFile: String? = nil,
+        keepAlive: Bool = false
     ) async throws -> [ScreenCapture] {
         // Ensure runner is extracted
         try await runner.ensureAvailable()
@@ -54,8 +55,11 @@ public enum RunnerSession {
             "--output", reportDir,
             "--flatten",
             "--wait-for-idle-timeout", "0",
-            flowPath,
         ]
+        if keepAlive {
+            args += ["--keep-alive"]
+        }
+        args += [flowPath]
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: runnerBin)
@@ -76,7 +80,9 @@ public enum RunnerSession {
         }
 
         // Timeout: kill the runner if it takes longer than 5 minutes
-        let timeoutSeconds: UInt64 = 300
+        // Keep-alive sessions block waiting for SIGINT; a normal 5-minute cap
+        // would kill them prematurely. Use an effectively-infinite timeout then.
+        let timeoutSeconds: UInt64 = keepAlive ? 60 * 60 * 24 : 300
         let pid = process.processIdentifier
         let timeoutTask = Task {
             try await Task.sleep(nanoseconds: timeoutSeconds * 1_000_000_000)
@@ -173,7 +179,8 @@ public enum RunnerSession {
         udid: String,
         runner: RunnerManager = .live,
         outputDir: String = ".grantiva/captures",
-        appFile: String? = nil
+        appFile: String? = nil,
+        keepAlive: Bool = false
     ) async throws -> [ScreenCapture] {
         // Resolve relative paths against the working directory where the CLI was invoked,
         // not the runner binary's temp directory.
@@ -231,8 +238,11 @@ public enum RunnerSession {
             "--output", reportDir,
             "--flatten",
             "--wait-for-idle-timeout", "0",
-            tempFlowPath,
         ]
+        if keepAlive {
+            args += ["--keep-alive"]
+        }
+        args += [tempFlowPath]
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: runnerBin)
@@ -248,7 +258,9 @@ public enum RunnerSession {
             stderrPipe.fileHandleForReading.readDataToEndOfFile()
         }
 
-        let timeoutSeconds: UInt64 = 300
+        // Keep-alive sessions block waiting for SIGINT; a normal 5-minute cap
+        // would kill them prematurely. Use an effectively-infinite timeout then.
+        let timeoutSeconds: UInt64 = keepAlive ? 60 * 60 * 24 : 300
         let pid = process.processIdentifier
         let timeoutTask = Task {
             try await Task.sleep(nanoseconds: timeoutSeconds * 1_000_000_000)

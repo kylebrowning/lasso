@@ -23,6 +23,9 @@ struct RunCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Run a single flow file instead of all configured flows")
     var flow: String?
 
+    @Flag(name: .long, help: "Keep GrantivaAgent session alive after flows complete so `grantiva hierarchy` can inspect UI state without relaunching the app. Release with Ctrl-C.")
+    var keepAlive: Bool = false
+
     var simulatorManager: SimulatorManager = .live
     var runnerManager: RunnerManager = .live
 
@@ -138,7 +141,8 @@ struct RunCommand: AsyncParsableCommand {
                     udid: device.udid,
                     runner: runnerManager,
                     outputDir: captureDir,
-                    appFile: productPath
+                    appFile: productPath,
+                    keepAlive: keepAlive
                 )
                 captures.append(contentsOf: screenCaptures)
             }
@@ -151,7 +155,8 @@ struct RunCommand: AsyncParsableCommand {
                     udid: device.udid,
                     runner: runnerManager,
                     outputDir: captureDir,
-                    appFile: productPath
+                    appFile: productPath,
+                    keepAlive: keepAlive
                 )
                 captures.append(contentsOf: flowCaptures)
             }
