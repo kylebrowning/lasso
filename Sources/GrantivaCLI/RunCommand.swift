@@ -139,7 +139,8 @@ struct RunCommand: AsyncParsableCommand {
                     bundleId: bid,
                     udid: device.udid,
                     runner: runnerManager,
-                    outputDir: captureDir
+                    outputDir: captureDir,
+                    appFile: productPath
                 )
                 captures.append(contentsOf: screenCaptures)
             }
@@ -151,7 +152,8 @@ struct RunCommand: AsyncParsableCommand {
                     bundleId: bid,
                     udid: device.udid,
                     runner: runnerManager,
-                    outputDir: captureDir
+                    outputDir: captureDir,
+                    appFile: productPath
                 )
                 captures.append(contentsOf: flowCaptures)
             }

@@ -9,7 +9,8 @@ public enum RunnerSession {
         bundleId: String,
         udid: String,
         runner: RunnerManager = .live,
-        outputDir: String = ".grantiva/captures"
+        outputDir: String = ".grantiva/captures",
+        appFile: String? = nil
     ) async throws -> [ScreenCapture] {
         // Ensure runner is extracted
         try await runner.ensureAvailable()
@@ -38,12 +39,17 @@ public enum RunnerSession {
 
         // Run the runner
         // Global flags go before `test`, test flags after
-        let args = [
+        var args = [
             runnerBin,
             "--platform", "ios",
             "--device", udid,
             "--no-ansi",
             "--no-app-install",
+        ]
+        if let appFile {
+            args += ["--app-file", appFile]
+        }
+        args += [
             "test",
             "--output", reportDir,
             "--flatten",
@@ -166,7 +172,8 @@ public enum RunnerSession {
         bundleId: String,
         udid: String,
         runner: RunnerManager = .live,
-        outputDir: String = ".grantiva/captures"
+        outputDir: String = ".grantiva/captures",
+        appFile: String? = nil
     ) async throws -> [ScreenCapture] {
         // Resolve relative paths against the working directory where the CLI was invoked,
         // not the runner binary's temp directory.
@@ -209,12 +216,17 @@ public enum RunnerSession {
             Task { _ = try? await shell("xcrun simctl status_bar \(udid) clear") }
         }
 
-        let args = [
+        var args = [
             runnerBin,
             "--platform", "ios",
             "--device", udid,
             "--no-ansi",
             "--no-app-install",
+        ]
+        if let appFile {
+            args += ["--app-file", appFile]
+        }
+        args += [
             "test",
             "--output", reportDir,
             "--flatten",
