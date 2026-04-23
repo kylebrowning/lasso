@@ -11,7 +11,8 @@ public enum RunnerSession {
         runner: RunnerManager = .live,
         outputDir: String = ".grantiva/captures",
         appFile: String? = nil,
-        keepAlive: Bool = false
+        keepAlive: Bool = false,
+        snapshot: String = "failure"
     ) async throws -> [ScreenCapture] {
         // Ensure runner is extracted
         try await runner.ensureAvailable()
@@ -28,7 +29,15 @@ public enum RunnerSession {
             .appendingPathComponent("grantiva-report-\(UUID().uuidString)")
             .path
         try FileManager.default.createDirectory(atPath: reportDir, withIntermediateDirectories: true)
+        // Defers fire in reverse order — trace must export before cleanup wipes
+        // the report dir, so declare cleanup first, then the export.
         defer { try? FileManager.default.removeItem(atPath: reportDir) }
+        defer {
+            exportTraceArtifacts(
+                reportDir: reportDir, outputDir: outputDir,
+                snapshot: snapshot, flowName: "screens"
+            )
+        }
 
         // Freeze status bar for deterministic screenshots
         _ = try? await shell(
@@ -55,6 +64,7 @@ public enum RunnerSession {
             "--output", reportDir,
             "--flatten",
             "--wait-for-idle-timeout", "0",
+            "--artifacts", runnerArtifactMode(for: snapshot),
         ]
         if keepAlive {
             args += ["--keep-alive"]
@@ -180,7 +190,8 @@ public enum RunnerSession {
         runner: RunnerManager = .live,
         outputDir: String = ".grantiva/captures",
         appFile: String? = nil,
-        keepAlive: Bool = false
+        keepAlive: Bool = false,
+        snapshot: String = "failure"
     ) async throws -> [ScreenCapture] {
         // Resolve relative paths against the working directory where the CLI was invoked,
         // not the runner binary's temp directory.
@@ -214,7 +225,16 @@ public enum RunnerSession {
             .appendingPathComponent("grantiva-report-\(UUID().uuidString)")
             .path
         try FileManager.default.createDirectory(atPath: reportDir, withIntermediateDirectories: true)
+        // Defers fire in reverse order — trace must export before cleanup wipes
+        // the report dir, so declare cleanup first, then the export.
         defer { try? FileManager.default.removeItem(atPath: reportDir) }
+        defer {
+            let flowName = URL(fileURLWithPath: flowPath).deletingPathExtension().lastPathComponent
+            exportTraceArtifacts(
+                reportDir: reportDir, outputDir: outputDir,
+                snapshot: snapshot, flowName: flowName
+            )
+        }
 
         _ = try? await shell(
             "xcrun simctl status_bar \(udid) override --time 9:41 --batteryState charged --batteryLevel 100 --wifiBars 3 --cellularBars 4"
@@ -238,6 +258,7 @@ public enum RunnerSession {
             "--output", reportDir,
             "--flatten",
             "--wait-for-idle-timeout", "0",
+            "--artifacts", runnerArtifactMode(for: snapshot),
         ]
         if keepAlive {
             args += ["--keep-alive"]
@@ -327,6 +348,115 @@ public enum RunnerSession {
         }
 
         return captures
+    }
+
+    /// Maps the CLI-facing snapshot mode to the runner's `--artifacts` value.
+    /// - `failure` → only capture on failure (runner's default behavior).
+    /// - `trailing`, `full` → capture every step; the CLI trims post-run if needed.
+    static func runnerArtifactMode(for snapshot: String) -> String {
+        switch snapshot.lowercased() {
+        case "trailing", "full", "always":
+            return "always"
+        case "never", "off", "none":
+            return "never"
+        default:
+            return "failure"
+        }
+    }
+
+    /// Copies the runner's per-step artifacts (PNG screenshots + XML hierarchy
+    /// dumps) out of the temp report dir into a user-visible `trace/` folder,
+    /// applying the snapshot policy.
+    ///
+    /// - `failure`: no trace/ files written. The simctl post-failure shot from
+    ///   RunCommand is still captured separately.
+    /// - `trailing`: keeps the failing step's artifacts plus the last successful
+    ///   step's "after" screenshot — the "state going into the failure."
+    /// - `full`: copies every captured artifact with a stable step-indexed name.
+    ///
+    /// Safe to call whether or not the runner succeeded. Best-effort: copy
+    /// failures are logged to stderr but never thrown.
+    static func exportTraceArtifacts(
+        reportDir: String,
+        outputDir: String,
+        snapshot: String,
+        flowName: String
+    ) {
+        let mode = snapshot.lowercased()
+        guard mode == "trailing" || mode == "full" else { return }
+
+        let fm = FileManager.default
+        let assetsDir = "\(reportDir)/assets"
+        guard fm.fileExists(atPath: assetsDir) else { return }
+
+        // The runner writes assets/<flow-id>/cmd-NNN-<kind>-<timing>.png (and .xml).
+        let flowDirs = (try? fm.contentsOfDirectory(atPath: assetsDir)) ?? []
+        guard let flowSubdir = flowDirs.first else { return }
+        let stepDir = "\(assetsDir)/\(flowSubdir)"
+
+        let traceDir = "\(outputDir)/trace"
+        if !fm.fileExists(atPath: traceDir) {
+            try? fm.createDirectory(atPath: traceDir, withIntermediateDirectories: true)
+        }
+
+        let entries = (try? fm.contentsOfDirectory(atPath: stepDir)) ?? []
+        let sorted = entries.sorted()
+
+        // Parse cmd-NNN-... prefix so we can group by step and decide what to keep.
+        struct StepArtifact {
+            let file: String
+            let index: Int
+            let kind: String // "before", "after", or "" (hierarchy xml)
+        }
+        var artifacts: [StepArtifact] = []
+        for name in sorted {
+            guard name.hasPrefix("cmd-") else { continue }
+            let stripped = String(name.dropFirst("cmd-".count))
+            let parts = stripped.split(separator: "-", maxSplits: 1).map(String.init)
+            guard let indexStr = parts.first, let idx = Int(indexStr) else { continue }
+            let kind: String
+            if name.hasSuffix("-before.png") {
+                kind = "before"
+            } else if name.hasSuffix("-after.png") {
+                kind = "after"
+            } else if name.hasSuffix(".xml") {
+                kind = "xml"
+            } else {
+                kind = "other"
+            }
+            artifacts.append(StepArtifact(file: name, index: idx, kind: kind))
+        }
+
+        let maxIndex = artifacts.map { $0.index }.max() ?? 0
+        let failingIndex = maxIndex // last captured step == last executed step
+
+        let keep: [StepArtifact]
+        switch mode {
+        case "full":
+            keep = artifacts
+        case "trailing":
+            // Failing step: all its artifacts. Previous step: just the "after"
+            // shot — that's the "last good state" right before the failing step.
+            keep = artifacts.filter { a in
+                if a.index == failingIndex { return true }
+                if a.index == failingIndex - 1 && a.kind == "after" { return true }
+                return false
+            }
+        default:
+            keep = []
+        }
+
+        for a in keep {
+            let dst = "\(traceDir)/\(flowName)-\(a.file)"
+            if fm.fileExists(atPath: dst) {
+                try? fm.removeItem(atPath: dst)
+            }
+            do {
+                try fm.copyItem(atPath: "\(stepDir)/\(a.file)", toPath: dst)
+            } catch {
+                FileHandle.standardError.write(Data("[grantiva] trace export failed for \(a.file): \(error)\n".utf8))
+            }
+        }
     }
 
     /// Injects or replaces the `appId` line in a Maestro flow YAML header.

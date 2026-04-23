@@ -35,6 +35,15 @@ struct RunCommand: AsyncParsableCommand {
     @Option(name: .long, help: "Log level for --logs: default, info, debug. Defaults to `default` (warnings/errors/default).")
     var logsLevel: String?
 
+    @Option(name: .long, help: "Snapshot policy: failure (default — one shot after failure), trailing (last-good step + failure step), full (every step).")
+    var snapshot: SnapshotMode = .failure
+
+    enum SnapshotMode: String, ExpressibleByArgument {
+        case failure
+        case trailing
+        case full
+    }
+
     var simulatorManager: SimulatorManager = .live
     var runnerManager: RunnerManager = .live
 
@@ -179,7 +188,8 @@ struct RunCommand: AsyncParsableCommand {
                     runner: runnerManager,
                     outputDir: captureDir,
                     appFile: productPath,
-                    keepAlive: keepAlive
+                    keepAlive: keepAlive,
+                    snapshot: snapshot.rawValue
                 )
                 captures.append(contentsOf: screenCaptures)
             }
@@ -193,7 +203,8 @@ struct RunCommand: AsyncParsableCommand {
                     runner: runnerManager,
                     outputDir: captureDir,
                     appFile: productPath,
-                    keepAlive: keepAlive
+                    keepAlive: keepAlive,
+                    snapshot: snapshot.rawValue
                 )
                 captures.append(contentsOf: flowCaptures)
             }
