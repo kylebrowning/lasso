@@ -218,7 +218,8 @@ public enum RunnerSession {
         outputDir: String = ".grantiva/captures",
         appFile: String? = nil,
         keepAlive: Bool = false,
-        snapshot: String = "failure"
+        snapshot: String = "failure",
+        failFast: Bool = true
     ) async throws -> [ScreenCapture] {
         guard !flowPaths.isEmpty else { return [] }
 
@@ -289,6 +290,9 @@ public enum RunnerSession {
             "--wait-for-idle-timeout", "0",
             "--artifacts", runnerArtifactMode(for: snapshot),
         ]
+        if failFast {
+            args += ["--fail-fast"]
+        }
         if keepAlive {
             args += ["--keep-alive"]
         }

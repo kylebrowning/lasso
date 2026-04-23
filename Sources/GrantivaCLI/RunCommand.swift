@@ -44,6 +44,9 @@ struct RunCommand: AsyncParsableCommand {
         case full
     }
 
+    @Flag(name: .long, help: "Keep running remaining flows after a failure. Default is fail-fast — stop the suite on the first broken flow, which matches CI semantics and avoids wasting cycles.")
+    var continueOnFailure: Bool = false
+
     var simulatorManager: SimulatorManager = .live
     var runnerManager: RunnerManager = .live
 
@@ -204,7 +207,8 @@ struct RunCommand: AsyncParsableCommand {
                     outputDir: captureDir,
                     appFile: productPath,
                     keepAlive: keepAlive,
-                    snapshot: snapshot.rawValue
+                    snapshot: snapshot.rawValue,
+                    failFast: !continueOnFailure
                 )
                 captures.append(contentsOf: flowCaptures)
             }
