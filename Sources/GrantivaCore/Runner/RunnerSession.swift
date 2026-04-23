@@ -1,5 +1,15 @@
 import Foundation
 
+/// Thread-safe flag used to record whether grantiva itself terminated the
+/// runner subprocess via its timeout task. Lets the error message distinguish
+/// a grantiva-initiated kill from a runner-side crash.
+final class KilledFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var value = false
+    func set() { lock.lock(); value = true; lock.unlock() }
+    var isSet: Bool { lock.lock(); defer { lock.unlock() }; return value }
+}
+
 /// Orchestrates the grantiva-runner execution and collects screenshot results.
 public enum RunnerSession {
     /// Run the embedded runner against a booted simulator.
@@ -219,7 +229,9 @@ public enum RunnerSession {
         appFile: String? = nil,
         keepAlive: Bool = false,
         snapshot: String = "failure",
-        failFast: Bool = true
+        failFast: Bool = true,
+        reportDir overrideReportDir: String? = nil,
+        timeoutSeconds: UInt64 = 600
     ) async throws -> [ScreenCapture] {
         guard !flowPaths.isEmpty else { return [] }
 
@@ -253,13 +265,31 @@ public enum RunnerSession {
             tempFlowPaths.append(tempFlowPath)
         }
 
-        let reportDir = FileManager.default.temporaryDirectory
-            .appendingPathComponent("grantiva-report-\(UUID().uuidString)")
-            .path
+        // If the caller passed --report-dir, write reports straight to it and
+        // preserve on exit so CI can upload them. Otherwise fall back to an
+        // ephemeral tmp dir that's wiped with the rest of the session.
+        let reportDir: String
+        let preserveReportDir: Bool
+        if let overrideReportDir, !overrideReportDir.isEmpty {
+            let resolved = overrideReportDir.hasPrefix("/")
+                ? overrideReportDir
+                : FileManager.default.currentDirectoryPath + "/" + overrideReportDir
+            reportDir = resolved
+            preserveReportDir = true
+        } else {
+            reportDir = FileManager.default.temporaryDirectory
+                .appendingPathComponent("grantiva-report-\(UUID().uuidString)")
+                .path
+            preserveReportDir = false
+        }
         try FileManager.default.createDirectory(atPath: reportDir, withIntermediateDirectories: true)
         // Defers fire in reverse order — trace must export before cleanup wipes
         // the report dir, so declare cleanup first, then the export.
-        defer { try? FileManager.default.removeItem(atPath: reportDir) }
+        defer {
+            if !preserveReportDir {
+                try? FileManager.default.removeItem(atPath: reportDir)
+            }
+        }
         defer {
             exportTraceArtifactsForAllFlows(
                 reportDir: reportDir, outputDir: outputDir, snapshot: snapshot
@@ -312,13 +342,17 @@ public enum RunnerSession {
             stderrPipe.fileHandleForReading.readDataToEndOfFile()
         }
 
-        // Keep-alive sessions block waiting for SIGINT; a normal 5-minute cap
-        // would kill them prematurely. Use an effectively-infinite timeout then.
-        let timeoutSeconds: UInt64 = keepAlive ? 60 * 60 * 24 : 300
+        // Keep-alive sessions block waiting for SIGINT; a normal cap would
+        // kill them prematurely. Use an effectively-infinite timeout then.
+        let effectiveTimeout: UInt64 = keepAlive ? 60 * 60 * 24 : timeoutSeconds
         let pid = process.processIdentifier
+        let killed = KilledFlag()
         let timeoutTask = Task {
-            try await Task.sleep(nanoseconds: timeoutSeconds * 1_000_000_000)
-            if process.isRunning { kill(pid, SIGTERM) }
+            try await Task.sleep(nanoseconds: effectiveTimeout * 1_000_000_000)
+            if process.isRunning {
+                killed.set()
+                kill(pid, SIGTERM)
+            }
         }
         process.waitUntilExit()
         timeoutTask.cancel()
@@ -327,10 +361,13 @@ public enum RunnerSession {
         let stderr = String(data: stderrData, encoding: .utf8) ?? ""
 
         guard process.terminationStatus == 0 else {
-            let timedOut = process.terminationStatus == 15
-            let reason = timedOut
-                ? "Runner timed out after \(timeoutSeconds)s"
-                : "Runner failed (exit \(process.terminationStatus))"
+            let grantivaTimedOut = killed.isSet
+            let reason: String
+            if grantivaTimedOut {
+                reason = "grantiva killed the runner after \(effectiveTimeout)s (--timeout <seconds> to raise the cap). The runner's last output above shows how far it got."
+            } else {
+                reason = "Runner failed (exit \(process.terminationStatus))"
+            }
             throw GrantivaError.commandFailed(
                 "\(reason):\n\(stderr.suffix(2000))",
                 process.terminationStatus

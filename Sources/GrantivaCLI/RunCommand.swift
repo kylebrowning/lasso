@@ -47,6 +47,12 @@ struct RunCommand: AsyncParsableCommand {
     @Flag(name: .long, help: "Keep running remaining flows after a failure. Default is fail-fast — stop the suite on the first broken flow, which matches CI semantics and avoids wasting cycles.")
     var continueOnFailure: Bool = false
 
+    @Option(name: .long, help: "Write the runner's report.json + assets to this directory (workspace-relative). Survives grantiva's cleanup so CI can upload it. Default: ephemeral tmp dir.")
+    var reportDir: String?
+
+    @Option(name: .long, help: "Max seconds to wait for the runner subprocess before killing it with SIGTERM. Default: 600 (10 min). Bump this for long multi-flow suites.")
+    var timeout: Int = 600
+
     var simulatorManager: SimulatorManager = .live
     var runnerManager: RunnerManager = .live
 
@@ -208,7 +214,9 @@ struct RunCommand: AsyncParsableCommand {
                     appFile: productPath,
                     keepAlive: keepAlive,
                     snapshot: snapshot.rawValue,
-                    failFast: !continueOnFailure
+                    failFast: !continueOnFailure,
+                    reportDir: reportDir,
+                    timeoutSeconds: UInt64(max(timeout, 30))
                 )
                 captures.append(contentsOf: flowCaptures)
             }
