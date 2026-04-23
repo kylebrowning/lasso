@@ -194,10 +194,10 @@ struct RunCommand: AsyncParsableCommand {
                 captures.append(contentsOf: screenCaptures)
             }
 
-            for flowPath in resolved.flows {
-                log("Running flow: \(flowPath)")
-                let flowCaptures = try await RunnerSession.runFlowFile(
-                    at: flowPath,
+            if !resolved.flows.isEmpty {
+                log("Running \(resolved.flows.count) flow(s) in one GrantivaAgent session: \(resolved.flows.joined(separator: ", "))")
+                let flowCaptures = try await RunnerSession.runFlowFiles(
+                    at: resolved.flows,
                     bundleId: bid,
                     udid: device.udid,
                     runner: runnerManager,

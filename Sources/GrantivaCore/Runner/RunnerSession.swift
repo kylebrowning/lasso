@@ -183,6 +183,7 @@ public enum RunnerSession {
 
     /// Run a pre-existing Maestro YAML flow file directly, collecting any screenshots it takes.
     /// Throws on runner failure the same as `run()`.
+    /// Back-compat thin wrapper — single flow = plural with one element.
     public static func runFlowFile(
         at flowPath: String,
         bundleId: String,
@@ -193,13 +194,38 @@ public enum RunnerSession {
         keepAlive: Bool = false,
         snapshot: String = "failure"
     ) async throws -> [ScreenCapture] {
+        try await runFlowFiles(
+            at: [flowPath], bundleId: bundleId, udid: udid,
+            runner: runner, outputDir: outputDir, appFile: appFile,
+            keepAlive: keepAlive, snapshot: snapshot
+        )
+    }
+
+    /// Runs all provided Maestro flow files in a SINGLE grantiva-runner
+    /// invocation. One WDA setup, one GrantivaAgent session, N flows run
+    /// sequentially in order. The runner stops on first failure by default,
+    /// matching user expectation ("don't waste cycles after something broke").
+    ///
+    /// Each flow file has its `appId` rewritten to the resolved bundleId in a
+    /// temp copy so flows living outside the project or missing headers still
+    /// launch the right app. Trace artifacts from every flow are exported
+    /// under a per-flow prefix in `<outputDir>/trace/`.
+    public static func runFlowFiles(
+        at flowPaths: [String],
+        bundleId: String,
+        udid: String,
+        runner: RunnerManager = .live,
+        outputDir: String = ".grantiva/captures",
+        appFile: String? = nil,
+        keepAlive: Bool = false,
+        snapshot: String = "failure"
+    ) async throws -> [ScreenCapture] {
+        guard !flowPaths.isEmpty else { return [] }
+
         // Resolve relative paths against the working directory where the CLI was invoked,
         // not the runner binary's temp directory.
-        let absoluteFlowPath: String
-        if flowPath.hasPrefix("/") {
-            absoluteFlowPath = flowPath
-        } else {
-            absoluteFlowPath = FileManager.default.currentDirectoryPath + "/" + flowPath
+        let absoluteFlowPaths: [String] = flowPaths.map { p in
+            p.hasPrefix("/") ? p : FileManager.default.currentDirectoryPath + "/" + p
         }
 
         try await runner.ensureAvailable()
@@ -207,19 +233,24 @@ public enum RunnerSession {
         let runnerBin = runner.runnerPath()
         let runnerDir = runner.runnerDir()
 
-        // Inject the resolved bundleId as appId into the flow YAML so the runner can
+        // Inject the resolved bundleId as appId into each flow YAML so the runner can
         // launch the app even when flow files live in a subdirectory and don't have appId,
         // or when grantiva.yml is not co-located with the flow file.
-        let originalContent = try String(contentsOfFile: absoluteFlowPath, encoding: .utf8)
-        let injectedContent = injectAppId(originalContent, bundleId: bundleId)
-        let originalFilename = URL(fileURLWithPath: absoluteFlowPath).lastPathComponent
         let tempFlowDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("grantiva-\(UUID().uuidString)")
             .path
         try FileManager.default.createDirectory(atPath: tempFlowDir, withIntermediateDirectories: true)
-        let tempFlowPath = "\(tempFlowDir)/\(originalFilename)"
-        try injectedContent.write(toFile: tempFlowPath, atomically: true, encoding: .utf8)
         defer { try? FileManager.default.removeItem(atPath: tempFlowDir) }
+
+        var tempFlowPaths: [String] = []
+        for absoluteFlowPath in absoluteFlowPaths {
+            let originalContent = try String(contentsOfFile: absoluteFlowPath, encoding: .utf8)
+            let injectedContent = injectAppId(originalContent, bundleId: bundleId)
+            let originalFilename = URL(fileURLWithPath: absoluteFlowPath).lastPathComponent
+            let tempFlowPath = "\(tempFlowDir)/\(originalFilename)"
+            try injectedContent.write(toFile: tempFlowPath, atomically: true, encoding: .utf8)
+            tempFlowPaths.append(tempFlowPath)
+        }
 
         let reportDir = FileManager.default.temporaryDirectory
             .appendingPathComponent("grantiva-report-\(UUID().uuidString)")
@@ -229,10 +260,8 @@ public enum RunnerSession {
         // the report dir, so declare cleanup first, then the export.
         defer { try? FileManager.default.removeItem(atPath: reportDir) }
         defer {
-            let flowName = URL(fileURLWithPath: flowPath).deletingPathExtension().lastPathComponent
-            exportTraceArtifacts(
-                reportDir: reportDir, outputDir: outputDir,
-                snapshot: snapshot, flowName: flowName
+            exportTraceArtifactsForAllFlows(
+                reportDir: reportDir, outputDir: outputDir, snapshot: snapshot
             )
         }
 
@@ -263,7 +292,7 @@ public enum RunnerSession {
         if keepAlive {
             args += ["--keep-alive"]
         }
-        args += [tempFlowPath]
+        args += tempFlowPaths
 
         let process = Process()
         process.executableURL = URL(fileURLWithPath: runnerBin)
@@ -310,41 +339,53 @@ public enum RunnerSession {
             try fm.createDirectory(atPath: outputDir, withIntermediateDirectories: true)
         }
 
-        let flowName = URL(fileURLWithPath: flowPath).deletingPathExtension().lastPathComponent
         let assetsDir = "\(reportDir)/assets"
         var captures: [ScreenCapture] = []
 
         if fm.fileExists(atPath: assetsDir) {
-            let flowDirs = (try? fm.contentsOfDirectory(atPath: assetsDir)) ?? []
-            let screenshotDir = flowDirs.first.map { "\(assetsDir)/\($0)" } ?? assetsDir
-            let screenshotFiles = ((try? fm.contentsOfDirectory(atPath: screenshotDir)) ?? [])
-                .filter { $0.hasSuffix(".png") }
-                .sorted()
+            // Walk every per-flow subdir. Each was produced by one of the flows
+            // in the batch; order is preserved by the runner, and `flowPaths`
+            // retains CLI order, so we can pair them.
+            let flowDirs = ((try? fm.contentsOfDirectory(atPath: assetsDir)) ?? []).sorted()
+            for (idx, flowDirName) in flowDirs.enumerated() {
+                let flowSrcPath = idx < flowPaths.count ? flowPaths[idx] : flowDirName
+                let flowName = URL(fileURLWithPath: flowSrcPath)
+                    .deletingPathExtension().lastPathComponent
+                let screenshotDir = "\(assetsDir)/\(flowDirName)"
+                let screenshotFiles = ((try? fm.contentsOfDirectory(atPath: screenshotDir)) ?? [])
+                    .filter { $0.hasSuffix(".png") }
+                    .sorted()
 
-            for file in screenshotFiles {
-                let screenshotName = "\(flowName)-\(URL(fileURLWithPath: file).deletingPathExtension().lastPathComponent)"
-                let srcPath = "\(screenshotDir)/\(file)"
-                let dstPath = "\(outputDir)/\(screenshotName).png"
-                if fm.fileExists(atPath: dstPath) { try fm.removeItem(atPath: dstPath) }
-                try fm.copyItem(atPath: srcPath, toPath: dstPath)
-                let data = try Data(contentsOf: URL(fileURLWithPath: dstPath))
-                captures.append(ScreenCapture(
-                    screenName: screenshotName,
-                    path: dstPath,
-                    sizeBytes: data.count,
-                    steps: [StepResult(action: "Run flow \"\(flowName)\"", status: .passed, duration: 0)]
-                ))
+                for file in screenshotFiles {
+                    let screenshotName = "\(flowName)-\(URL(fileURLWithPath: file).deletingPathExtension().lastPathComponent)"
+                    let srcPath = "\(screenshotDir)/\(file)"
+                    let dstPath = "\(outputDir)/\(screenshotName).png"
+                    if fm.fileExists(atPath: dstPath) { try fm.removeItem(atPath: dstPath) }
+                    try fm.copyItem(atPath: srcPath, toPath: dstPath)
+                    let data = try Data(contentsOf: URL(fileURLWithPath: dstPath))
+                    captures.append(ScreenCapture(
+                        screenName: screenshotName,
+                        path: dstPath,
+                        sizeBytes: data.count,
+                        steps: [StepResult(action: "Run flow \"\(flowName)\"", status: .passed, duration: 0)]
+                    ))
+                }
             }
         }
 
-        // If the flow ran but took no screenshots, still report it as passed
+        // If no flow took any screenshots, emit one "ran" capture per flow so
+        // callers see a row in the summary.
         if captures.isEmpty {
-            captures.append(ScreenCapture(
-                screenName: flowName,
-                path: "",
-                sizeBytes: 0,
-                steps: [StepResult(action: "Run flow \"\(flowName)\"", status: .passed, duration: 0)]
-            ))
+            for flowPath in flowPaths {
+                let flowName = URL(fileURLWithPath: flowPath)
+                    .deletingPathExtension().lastPathComponent
+                captures.append(ScreenCapture(
+                    screenName: flowName,
+                    path: "",
+                    sizeBytes: 0,
+                    steps: [StepResult(action: "Run flow \"\(flowName)\"", status: .passed, duration: 0)]
+                ))
+            }
         }
 
         return captures
@@ -380,7 +421,8 @@ public enum RunnerSession {
         reportDir: String,
         outputDir: String,
         snapshot: String,
-        flowName: String
+        flowName: String,
+        restrictToFlowDir: String? = nil
     ) {
         let mode = snapshot.lowercased()
         guard mode == "trailing" || mode == "full" else { return }
@@ -390,8 +432,14 @@ public enum RunnerSession {
         guard fm.fileExists(atPath: assetsDir) else { return }
 
         // The runner writes assets/<flow-id>/cmd-NNN-<kind>-<timing>.png (and .xml).
-        let flowDirs = (try? fm.contentsOfDirectory(atPath: assetsDir)) ?? []
-        guard let flowSubdir = flowDirs.first else { return }
+        let flowSubdir: String?
+        if let restrictToFlowDir {
+            flowSubdir = restrictToFlowDir
+        } else {
+            let flowDirs = (try? fm.contentsOfDirectory(atPath: assetsDir)) ?? []
+            flowSubdir = flowDirs.first
+        }
+        guard let flowSubdir else { return }
         let stepDir = "\(assetsDir)/\(flowSubdir)"
 
         let traceDir = "\(outputDir)/trace"
@@ -456,6 +504,33 @@ public enum RunnerSession {
             } catch {
                 FileHandle.standardError.write(Data("[grantiva] trace export failed for \(a.file): \(error)\n".utf8))
             }
+        }
+    }
+
+    /// Convenience wrapper that walks every per-flow assets subdir and runs the
+    /// trace export for each. Used by the batched runFlowFiles path.
+    static func exportTraceArtifactsForAllFlows(
+        reportDir: String,
+        outputDir: String,
+        snapshot: String
+    ) {
+        let mode = snapshot.lowercased()
+        guard mode == "trailing" || mode == "full" else { return }
+
+        let fm = FileManager.default
+        let assetsDir = "\(reportDir)/assets"
+        guard fm.fileExists(atPath: assetsDir) else { return }
+        let flowDirs = ((try? fm.contentsOfDirectory(atPath: assetsDir)) ?? []).sorted()
+        for flowDirName in flowDirs {
+            // Build a synthetic reportDir that points at this one flow, because
+            // exportTraceArtifacts expects `<reportDir>/assets/<flow>/…` layout
+            // and walks the first subdir. Simplest adapter: pass the root-level
+            // reportDir but hint the flowName from the subdir name.
+            exportTraceArtifacts(
+                reportDir: reportDir, outputDir: outputDir,
+                snapshot: snapshot, flowName: flowDirName,
+                restrictToFlowDir: flowDirName
+            )
         }
     }
 
